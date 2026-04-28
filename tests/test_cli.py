@@ -14,6 +14,7 @@ def test_cli_help_exits_successfully() -> None:
     assert "ai-crawler" in result.stdout
     assert "doctor" in result.stdout
     assert "probe" in result.stdout
+    assert "compile" in result.stdout
     assert "run" in result.stdout
     assert "generate-recipe" in result.stdout
     assert "test-recipe" in result.stdout

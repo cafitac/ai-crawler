@@ -84,6 +84,12 @@ AI is not the request loop. AI is the planner/debugger/recipe author.
 AI harness 자동 모드:
 
 ```bash
+ai-crawler compile https://example.com/products --goal "collect products" --json
+```
+
+Evidence를 사람이 확인/수정해야 하는 경우의 분리 모드:
+
+```bash
 ai-crawler probe https://example.com/products --goal "collect products"
 ai-crawler auto evidence.json --json
 ```
@@ -91,7 +97,7 @@ ai-crawler auto evidence.json --json
 일반 CLI 자동 모드:
 
 ```bash
-ai-crawler auto evidence.json
+ai-crawler compile https://example.com/products --goal "collect products"
 ```
 
 내부 흐름:

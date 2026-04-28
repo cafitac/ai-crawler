@@ -41,15 +41,21 @@ uv sync --extra dev --extra http --extra mcp
 
 ## Quick start
 
-If you need to create evidence from a page, run a short browser probe first:
+The one-command path from URL to crawler artifacts is:
 
 ```bash
 uv sync --extra browser --extra http
+uv run --extra browser --extra http ai-crawler compile https://example.com/products --goal "collect products" --json
+```
+
+`compile` opens the page briefly, records normalized network response events into `evidence.json`, generates a recipe, tests it, repairs extraction when possible, retests, and writes final JSONL output. The browser is only used for discovery; the generated recipe and final crawl use deterministic HTTP replay.
+
+If you want to inspect or edit evidence before compiling, split the flow:
+
+```bash
 uv run --extra browser ai-crawler probe https://example.com/products --goal "collect products"
 uv run --extra http ai-crawler auto evidence.json --json
 ```
-
-`probe` opens the page briefly, records normalized network response events, and writes `evidence.json`. The browser is only used for discovery; the later `auto`/`run` steps use deterministic HTTP replay.
 
 If you already have an evidence file, the main AI-harness command is:
 
@@ -108,6 +114,12 @@ Minimal evidence JSON:
 ```
 
 Generate and run manually:
+
+```bash
+uv run --extra browser --extra http ai-crawler compile https://example.com/products --goal "collect products" --json
+```
+
+Or run each artifact step yourself:
 
 ```bash
 uv run --extra http ai-crawler generate-recipe evidence.json
@@ -212,7 +224,7 @@ Development docs live under `.dev/`:
 
 ## Status
 
-Alpha. The deterministic recipe compiler, browser probe CLI, CLI, SDK facade, MCP server, redaction, failure classification, and fixture smoke tests are implemented. Real LLM provider integrations are intentionally optional/future layers behind adapter boundaries.
+Alpha. The deterministic recipe compiler, one-command `compile` flow, browser probe CLI, CLI, SDK facade, MCP server, redaction, failure classification, and fixture smoke tests are implemented. Real LLM provider integrations are intentionally optional/future layers behind adapter boundaries.
 
 ## License
 

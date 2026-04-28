@@ -69,6 +69,58 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to write EvidenceBundle JSON.",
     )
 
+    compile_parser = subparsers.add_parser(
+        "compile",
+        help="Probe a URL, generate, test, repair, and retest in one command.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    compile_parser.add_argument("url", help="Target page URL to probe and compile.")
+    compile_parser.add_argument(
+        "--goal",
+        default="collect data",
+        help="Human goal to include in generated evidence.",
+    )
+    compile_parser.add_argument(
+        "--evidence",
+        default=DEFAULT_EVIDENCE_OUTPUT,
+        help="Path to write browser probe evidence JSON.",
+    )
+    compile_parser.add_argument(
+        "--recipe",
+        default=DEFAULT_GENERATED_RECIPE,
+        help="Path to write the initial generated recipe YAML.",
+    )
+    compile_parser.add_argument(
+        "--repaired-recipe",
+        default=DEFAULT_REPAIRED_RECIPE,
+        help="Path to write the repaired recipe YAML.",
+    )
+    compile_parser.add_argument(
+        "--test-output",
+        default=DEFAULT_TEST_OUTPUT,
+        help="Path to write the initial test JSON Lines output.",
+    )
+    compile_parser.add_argument(
+        "--output",
+        default=DEFAULT_RUN_OUTPUT,
+        help="Path to write final JSON Lines crawl output.",
+    )
+    compile_parser.add_argument(
+        "--report",
+        default=DEFAULT_AUTO_REPORT,
+        help="Path to write the final auto report JSON.",
+    )
+    compile_parser.add_argument(
+        "--name",
+        default="generated-recipe",
+        help="Recipe name to write into generated artifacts.",
+    )
+    compile_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the final compile report JSON to stdout for AI harnesses.",
+    )
+
     run_parser = subparsers.add_parser(
         "run",
         help="Run a validated crawler recipe.",
@@ -213,6 +265,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "probe":
         return probe_command(url=args.url, goal=args.goal, output_path=args.output)
 
+    if args.command == "compile":
+        return compile_command(
+            url=args.url,
+            goal=args.goal,
+            evidence_path=args.evidence,
+            recipe_path=args.recipe,
+            repaired_recipe_path=args.repaired_recipe,
+            initial_output_path=args.test_output,
+            final_output_path=args.output,
+            report_path=args.report,
+            name=args.name,
+            json_output=args.json,
+        )
+
     if args.command == "generate-recipe":
         return generate_recipe_command(
             evidence_path=args.evidence,
@@ -275,6 +341,57 @@ def probe_command(url: str, goal: str, output_path: str) -> int:
     _write_evidence_json(evidence=evidence, output_path=output_path)
     print(f"ai-crawler probe: events={len(evidence.events)} output={output_path}")
     return 0
+
+
+def compile_command(
+    url: str,
+    goal: str,
+    evidence_path: str,
+    recipe_path: str,
+    repaired_recipe_path: str,
+    initial_output_path: str,
+    final_output_path: str,
+    report_path: str,
+    name: str,
+    json_output: bool = False,
+) -> int:
+    """Probe a URL and run the deterministic auto compiler from captured evidence."""
+    normalized_evidence_path = str(Path(evidence_path).resolve())
+    normalized_recipe_path = str(Path(recipe_path).resolve())
+    normalized_repaired_path = str(Path(repaired_recipe_path).resolve())
+    normalized_initial_output = str(Path(initial_output_path).resolve())
+    normalized_final_output = str(Path(final_output_path).resolve())
+    normalized_report_path = str(Path(report_path).resolve())
+    evidence = create_default_probe().probe(url=url, goal=goal)
+    _write_evidence_json(evidence=evidence, output_path=normalized_evidence_path)
+    result = AutoRecipeCompiler(fetcher=create_default_fetcher()).compile(
+        evidence=evidence,
+        recipe_name=name,
+        initial_output_path=normalized_initial_output,
+        final_output_path=normalized_final_output,
+    )
+    _write_recipe_yaml(recipe=result.recipe, output_path=normalized_recipe_path)
+    _write_recipe_yaml(recipe=result.repaired_recipe, output_path=normalized_repaired_path)
+    report = _write_auto_report(
+        result=result,
+        report_path=normalized_report_path,
+        recipe_path=normalized_recipe_path,
+        repaired_recipe_path=normalized_repaired_path,
+        output_path=normalized_final_output,
+        evidence_path=normalized_evidence_path,
+    )
+    if json_output:
+        print(json.dumps(report, ensure_ascii=False))
+        return _auto_exit_code(result)
+    print(
+        "ai-crawler compile: "
+        f"recipe={result.repaired_recipe.name} "
+        f"items_written={result.final_crawl_result.items_written} "
+        f"evidence={normalized_evidence_path} "
+        f"output={normalized_final_output} "
+        f"report={normalized_report_path}"
+    )
+    return _auto_exit_code(result)
 
 
 def run_recipe_command(recipe_path: str, output_path: str) -> int:
@@ -450,12 +567,14 @@ def _write_auto_report(
     recipe_path: str,
     repaired_recipe_path: str,
     output_path: str,
+    evidence_path: str | None = None,
 ) -> dict[str, Any]:
     report = _auto_report_payload(
         result=result,
         recipe_path=recipe_path,
         repaired_recipe_path=repaired_recipe_path,
         output_path=output_path,
+        evidence_path=evidence_path,
     )
     target = Path(report_path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -471,8 +590,9 @@ def _auto_report_payload(
     recipe_path: str,
     repaired_recipe_path: str,
     output_path: str,
+    evidence_path: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    report = {
         "ok": result.ok,
         "summary": result.summary,
         "recipe_path": recipe_path,
@@ -485,6 +605,9 @@ def _auto_report_payload(
         "initial_failure_classification": result.initial_failure_classification,
         "final_failure_classification": result.final_failure_classification,
     }
+    if evidence_path is not None:
+        report["evidence_path"] = evidence_path
+    return report
 
 
 def _load_json_object(path: str) -> dict[str, Any]:
