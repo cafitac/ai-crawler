@@ -122,6 +122,8 @@ pytest tests/component -q
 
 - `ai-crawler[browser]` extra 설치 필요
 - CI에서는 browser test job을 별도 분리
+- probe evidence는 기본적으로 `fetch`/`xhr` 2xx/3xx 응답만 replay candidate로 남기고 static asset, 실패 status, 기타 resource type noise를 제거한다.
+- `--wait-ms`, `--max-events`, `--include-resource-type` CLI option은 component test에서 config 전달을 검증하고, browser integration test에서는 필요 시 fixture별로 tuning한다.
 
 명령:
 
@@ -273,11 +275,16 @@ pytest tests/e2e/test_fixture_auto_crawl.py -q
 - robots.txt/ToS를 확인한다.
 - 낮은 rate로 실행한다.
 - 대상 사이트 목록은 별도 allowlist로 관리한다.
+- 현재 수동 smoke 후보는 `https://quotes.toscrape.com/js/`로 둔다. 공개 scraping 연습용 사이트이고 JavaScript rendering이 필요해 real browser probe 품질을 확인하기 쉽다.
+- 실제 외부 사이트 smoke는 우선 `probe`만 실행해 sanitized `evidence.json`의 candidate 수/observations를 확인하고, 허용 가능할 때만 `compile`까지 확장한다.
 
 명령:
 
 ```bash
 AI_CRAWLER_RUN_REALWORLD_TESTS=1 pytest tests/realworld -q
+
+# Manual real-browser smoke target (not default CI):
+uv run --extra browser ai-crawler probe https://quotes.toscrape.com/js/ --goal "collect quotes" --wait-ms 2500 --include-resource-type fetch,xhr,document --output evidence.realworld.json
 ```
 
 수집 metric:

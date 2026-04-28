@@ -48,12 +48,13 @@ uv sync --extra browser --extra http
 uv run --extra browser --extra http ai-crawler compile https://example.com/products --goal "collect products" --json
 ```
 
-`compile` opens the page briefly, records normalized network response events into `evidence.json`, generates a recipe, tests it, repairs extraction when possible, retests, and writes final JSONL output. The browser is only used for discovery; the generated recipe and final crawl use deterministic HTTP replay.
+`compile` opens the page briefly, records normalized network response events into `evidence.json`, generates a recipe, tests it, repairs extraction when possible, retests, and writes final JSONL output. The browser is only used for discovery; the generated recipe and final crawl use deterministic HTTP replay. By default, probe evidence keeps replay-friendly `fetch`/`xhr` 2xx/3xx responses and drops static assets, failed responses, and other browser noise.
 
 If you want to inspect or edit evidence before compiling, split the flow:
 
 ```bash
 uv run --extra browser ai-crawler probe https://example.com/products --goal "collect products"
+uv run --extra browser ai-crawler probe https://example.com/products --goal "collect products" --wait-ms 2500 --max-events 50 --include-resource-type fetch,xhr,document
 uv run --extra http ai-crawler auto evidence.json --json
 ```
 
@@ -100,6 +101,12 @@ Create evidence with a short browser probe:
 ```bash
 uv run --extra browser ai-crawler probe https://example.com/products --goal "collect products" --output evidence.json
 ```
+
+The probe tuning options are available on both `probe` and `compile`:
+
+- `--wait-ms`: browser settle time after network idle (default: `1000`)
+- `--max-events`: maximum replay candidates retained after filtering (default: `200`)
+- `--include-resource-type`: comma-separated Playwright resource types to retain (default: `fetch,xhr`)
 
 Minimal evidence JSON:
 

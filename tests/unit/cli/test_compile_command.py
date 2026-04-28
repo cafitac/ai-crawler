@@ -3,6 +3,8 @@
 import importlib
 import json
 
+import pytest
+
 from ai_crawler.core.models import EvidenceBundle, FetchResponse, NetworkEvent, RequestSpec
 
 cli_main = importlib.import_module("ai_crawler.cli.main")
@@ -44,6 +46,16 @@ class SensitiveFailingProbe:
         raise RuntimeError("navigation failed token=abcdef123456")
 
 
+class ProbeFactory:
+    def __init__(self, probe) -> None:
+        self.probe = probe
+        self.configs = []
+
+    def __call__(self, config=None):
+        self.configs.append(config)
+        return self.probe
+
+
 class ProductApiFetcher:
     def fetch(self, request: RequestSpec) -> FetchResponse:
         return FetchResponse(
@@ -78,7 +90,7 @@ def test_compile_command_probes_then_auto_compiles_with_defaults(
     test_output_path = tmp_path / "test.jsonl"
     output_path = tmp_path / "crawl.jsonl"
     report_path = tmp_path / "auto.report.json"
-    monkeypatch.setattr(cli_main, "create_default_probe", lambda: fake_probe)
+    monkeypatch.setattr(cli_main, "create_default_probe", lambda config=None: fake_probe)
     monkeypatch.setattr(cli_main, "create_default_fetcher", lambda: ProductApiFetcher())
 
     exit_code = cli_main.main(
@@ -139,7 +151,7 @@ def test_compile_command_json_mode_prints_only_machine_readable_report(
     fake_probe = FakeProbe()
     evidence_path = tmp_path / "evidence.json"
     report_path = tmp_path / "auto.report.json"
-    monkeypatch.setattr(cli_main, "create_default_probe", lambda: fake_probe)
+    monkeypatch.setattr(cli_main, "create_default_probe", lambda config=None: fake_probe)
     monkeypatch.setattr(cli_main, "create_default_fetcher", lambda: ProductApiFetcher())
 
     exit_code = cli_main.main(
@@ -179,7 +191,7 @@ def test_compile_command_json_mode_reports_no_endpoint_candidates(
 ) -> None:
     evidence_path = tmp_path / "evidence.json"
     report_path = tmp_path / "auto.report.json"
-    monkeypatch.setattr(cli_main, "create_default_probe", lambda: EmptyProbe())
+    monkeypatch.setattr(cli_main, "create_default_probe", lambda config=None: EmptyProbe())
     monkeypatch.setattr(cli_main, "create_default_fetcher", lambda: ProductApiFetcher())
 
     exit_code = cli_main.main(
@@ -243,7 +255,7 @@ def test_compile_command_json_mode_reports_final_test_failure_phase(
 ) -> None:
     evidence_path = tmp_path / "evidence.json"
     report_path = tmp_path / "auto.report.json"
-    monkeypatch.setattr(cli_main, "create_default_probe", lambda: FakeProbe())
+    monkeypatch.setattr(cli_main, "create_default_probe", lambda config=None: FakeProbe())
     monkeypatch.setattr(cli_main, "create_default_fetcher", lambda: EmptyApiFetcher())
 
     exit_code = cli_main.main(
@@ -282,7 +294,11 @@ def test_compile_command_json_mode_redacts_probe_failure_summary(
     capsys,
 ) -> None:
     report_path = tmp_path / "auto.report.json"
-    monkeypatch.setattr(cli_main, "create_default_probe", lambda: SensitiveFailingProbe())
+    monkeypatch.setattr(
+        cli_main,
+        "create_default_probe",
+        lambda config=None: SensitiveFailingProbe(),
+    )
 
     exit_code = cli_main.main(
         [
@@ -315,3 +331,64 @@ def test_compile_command_json_mode_redacts_probe_failure_summary(
     assert "abcdef123456" not in report_text
     assert "token=[REDACTED]" in captured.err
     assert json.loads(report_text) == stdout_report
+
+
+def test_compile_command_accepts_probe_tuning_options(tmp_path, monkeypatch) -> None:
+    fake_probe = FakeProbe()
+    probe_factory = ProbeFactory(fake_probe)
+    monkeypatch.setattr(cli_main, "create_default_probe", probe_factory)
+    monkeypatch.setattr(cli_main, "create_default_fetcher", lambda: ProductApiFetcher())
+
+    exit_code = cli_main.main(
+        [
+            "compile",
+            "https://example.test/products",
+            "--wait-ms",
+            "2500",
+            "--max-events",
+            "9",
+            "--include-resource-type",
+            "document,xhr",
+            "--evidence",
+            str(tmp_path / "evidence.json"),
+            "--recipe",
+            str(tmp_path / "recipe.yaml"),
+            "--repaired-recipe",
+            str(tmp_path / "repaired.recipe.yaml"),
+            "--test-output",
+            str(tmp_path / "test.jsonl"),
+            "--output",
+            str(tmp_path / "crawl.jsonl"),
+            "--report",
+            str(tmp_path / "auto.report.json"),
+        ]
+    )
+
+    assert exit_code == 0
+    config = probe_factory.configs[0]
+    assert config.wait_after_load_ms == 2500
+    assert config.max_events == 9
+    assert config.include_resource_types == ("document", "xhr")
+
+
+def test_compile_command_rejects_invalid_probe_tuning_before_probe(tmp_path, monkeypatch) -> None:
+    fake_probe = FakeProbe()
+    probe_factory = ProbeFactory(fake_probe)
+    monkeypatch.setattr(cli_main, "create_default_probe", probe_factory)
+
+    with pytest.raises(SystemExit) as error:
+        cli_main.main(
+            [
+                "compile",
+                "https://example.test/products",
+                "--max-events",
+                "0",
+                "--evidence",
+                str(tmp_path / "evidence.json"),
+                "--json",
+            ]
+        )
+
+    assert error.value.code == 2
+    assert probe_factory.configs == []
+    assert fake_probe.calls == []

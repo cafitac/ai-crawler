@@ -5,7 +5,6 @@ from time import sleep
 from typing import Any
 
 from ai_crawler.adapters.browser.probe import (
-    DEFAULT_BROWSER_PROBE_CONFIG,
     BrowserNetworkProbe,
     BrowserProbeConfig,
     BrowserProbeDriver,
@@ -19,7 +18,7 @@ class PlaywrightNetworkProbe(BrowserNetworkProbe):
     def __init__(
         self,
         driver: BrowserProbeDriver | None = None,
-        config: BrowserProbeConfig = DEFAULT_BROWSER_PROBE_CONFIG,
+        config: BrowserProbeConfig | None = None,
     ) -> None:
         selected_driver = driver or PlaywrightNetworkDriver()
         super().__init__(driver=selected_driver, config=config)

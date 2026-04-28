@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_crawler import __version__
-from ai_crawler.adapters.browser import PlaywrightNetworkProbe
+from ai_crawler.adapters.browser import BrowserProbeConfig, PlaywrightNetworkProbe
 from ai_crawler.adapters.http import CurlCffiFetcher
 from ai_crawler.core.agent import (
     AutoCompileResult,
@@ -70,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_EVIDENCE_OUTPUT,
         help="Path to write EvidenceBundle JSON.",
     )
+    _add_probe_tuning_options(probe_parser)
 
     compile_parser = subparsers.add_parser(
         "compile",
@@ -122,6 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the final compile report JSON to stdout for AI harnesses.",
     )
+    _add_probe_tuning_options(compile_parser)
 
     run_parser = subparsers.add_parser(
         "run",
@@ -253,6 +255,66 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _add_probe_tuning_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--wait-ms",
+        type=_non_negative_int,
+        default=1_000,
+        help="Milliseconds to wait after browser network idle during probe.",
+    )
+    parser.add_argument(
+        "--max-events",
+        type=_positive_int,
+        default=200,
+        help="Maximum replay candidate events to keep after probe filtering.",
+    )
+    parser.add_argument(
+        "--include-resource-type",
+        type=_non_empty_csv,
+        default="fetch,xhr",
+        help="Comma-separated browser resource types to keep as replay candidates.",
+    )
+
+
+def _probe_config_from_args(args: argparse.Namespace) -> BrowserProbeConfig:
+    return BrowserProbeConfig(
+        wait_after_load_ms=args.wait_ms,
+        max_events=args.max_events,
+        include_resource_types=_parse_csv_tuple(args.include_resource_type),
+    )
+
+
+def _parse_csv_tuple(value: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in value.split(",") if part.strip())
+
+
+def _non_negative_int(value: str) -> int:
+    parsed = _parse_int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be greater than or equal to 0")
+    return parsed
+
+
+def _positive_int(value: str) -> int:
+    parsed = _parse_int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be greater than or equal to 1")
+    return parsed
+
+
+def _parse_int(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an integer") from error
+
+
+def _non_empty_csv(value: str) -> str:
+    if not _parse_csv_tuple(value):
+        raise argparse.ArgumentTypeError("must include at least one value")
+    return value
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -265,7 +327,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_recipe_command(recipe_path=args.recipe, output_path=args.output)
 
     if args.command == "probe":
-        return probe_command(url=args.url, goal=args.goal, output_path=args.output)
+        return probe_command(
+            url=args.url,
+            goal=args.goal,
+            output_path=args.output,
+            probe_config=_probe_config_from_args(args),
+        )
 
     if args.command == "compile":
         return compile_command(
@@ -279,6 +346,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             report_path=args.report,
             name=args.name,
             json_output=args.json,
+            probe_config=_probe_config_from_args(args),
         )
 
     if args.command == "generate-recipe":
@@ -337,9 +405,14 @@ def mcp_config_command(client: str, project_path: str) -> int:
     return 0
 
 
-def probe_command(url: str, goal: str, output_path: str) -> int:
+def probe_command(
+    url: str,
+    goal: str,
+    output_path: str,
+    probe_config: BrowserProbeConfig | None = None,
+) -> int:
     """Capture browser network evidence and write an EvidenceBundle JSON file."""
-    evidence = create_default_probe().probe(url=url, goal=goal)
+    evidence = create_default_probe(config=probe_config).probe(url=url, goal=goal)
     _write_evidence_json(evidence=evidence, output_path=output_path)
     print(f"ai-crawler probe: events={len(evidence.events)} output={output_path}")
     return 0
@@ -356,6 +429,7 @@ def compile_command(
     report_path: str,
     name: str,
     json_output: bool = False,
+    probe_config: BrowserProbeConfig | None = None,
 ) -> int:
     """Probe a URL and run the deterministic auto compiler from captured evidence."""
     normalized_evidence_path = str(Path(evidence_path).resolve())
@@ -365,7 +439,7 @@ def compile_command(
     normalized_final_output = str(Path(final_output_path).resolve())
     normalized_report_path = str(Path(report_path).resolve())
     try:
-        evidence = create_default_probe().probe(url=url, goal=goal)
+        evidence = create_default_probe(config=probe_config).probe(url=url, goal=goal)
     except Exception as error:
         report = _write_compile_failure_report(
             report_path=normalized_report_path,
@@ -830,6 +904,6 @@ def create_default_fetcher() -> RecipeFetcher:
     return CurlCffiFetcher()
 
 
-def create_default_probe() -> PlaywrightNetworkProbe:
+def create_default_probe(config: BrowserProbeConfig | None = None) -> PlaywrightNetworkProbe:
     """Create the default short browser probe for evidence discovery."""
-    return PlaywrightNetworkProbe()
+    return PlaywrightNetworkProbe(config=config or BrowserProbeConfig())
