@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-crawler"
+version = "0.1.0"
+description = "AI-powered network-first crawler compiler for authorized workflows."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "cafitac" }]
+keywords = ["crawler", "network", "ai", "recipe", "curl-cffi", "mcp"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Internet :: WWW/HTTP",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = ["pydantic>=2.8", "pyyaml>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.8"]
+http = ["curl-cffi>=0.7"]
+browser = ["playwright>=1.48"]
+llm = ["httpx>=0.27"]
+mcp = ["mcp>=1.0", "curl-cffi>=0.7"]
+all = ["ai-crawler[http,browser,llm,mcp]"]
+
+[project.scripts]
+ai-crawler = "ai_crawler.cli.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
