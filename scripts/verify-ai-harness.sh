@@ -10,6 +10,7 @@ uv run --extra dev pytest \
   tests/unit/core/agent/test_auto_compiler.py \
   tests/unit/cli/test_test_recipe_command.py \
   tests/unit/cli/test_auto_command.py \
+  tests/unit/cli/test_probe_command.py \
   tests/unit/cli/test_mcp_config_command.py \
   tests/unit/sdk/test_client.py \
   tests/unit/mcp/test_config.py \

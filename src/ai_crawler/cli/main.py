@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_crawler import __version__
+from ai_crawler.adapters.browser import PlaywrightNetworkProbe
 from ai_crawler.adapters.http import CurlCffiFetcher
 from ai_crawler.core.agent import (
     AutoCompileResult,
@@ -24,6 +25,7 @@ from ai_crawler.core.runner import RecipeFetcher, RecipeRunner, RunnerConfig
 from ai_crawler.mcp.config import SUPPORTED_CLIENTS, build_client_config
 
 DEFAULT_RUN_OUTPUT = "crawl.jsonl"
+DEFAULT_EVIDENCE_OUTPUT = "evidence.json"
 DEFAULT_GENERATED_RECIPE = "recipe.yaml"
 DEFAULT_TEST_OUTPUT = "test.jsonl"
 DEFAULT_TEST_REPORT = "report.json"
@@ -48,6 +50,23 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor",
         help="Check local ai-crawler environment readiness.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    probe_parser = subparsers.add_parser(
+        "probe",
+        help="Open a target briefly in a browser and write network evidence JSON.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    probe_parser.add_argument("url", help="Target page URL to inspect with a short browser probe.")
+    probe_parser.add_argument(
+        "--goal",
+        default="collect data",
+        help="Human goal to include in the evidence bundle.",
+    )
+    probe_parser.add_argument(
+        "--output",
+        default=DEFAULT_EVIDENCE_OUTPUT,
+        help="Path to write EvidenceBundle JSON.",
     )
 
     run_parser = subparsers.add_parser(
@@ -191,6 +210,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "run":
         return run_recipe_command(recipe_path=args.recipe, output_path=args.output)
 
+    if args.command == "probe":
+        return probe_command(url=args.url, goal=args.goal, output_path=args.output)
+
     if args.command == "generate-recipe":
         return generate_recipe_command(
             evidence_path=args.evidence,
@@ -244,6 +266,14 @@ def mcp_command() -> int:
 def mcp_config_command(client: str, project_path: str) -> int:
     """Print a copy-pasteable MCP client configuration snippet."""
     print(build_client_config(client=client, project_path=project_path))
+    return 0
+
+
+def probe_command(url: str, goal: str, output_path: str) -> int:
+    """Capture browser network evidence and write an EvidenceBundle JSON file."""
+    evidence = create_default_probe().probe(url=url, goal=goal)
+    _write_evidence_json(evidence=evidence, output_path=output_path)
+    print(f"ai-crawler probe: events={len(evidence.events)} output={output_path}")
     return 0
 
 
@@ -405,6 +435,15 @@ def _write_tool_report(result: ToolResult, report_path: str) -> None:
     )
 
 
+def _write_evidence_json(evidence: EvidenceBundle, output_path: str) -> None:
+    target = Path(output_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(evidence.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _write_auto_report(
     result: AutoCompileResult,
     report_path: str,
@@ -473,3 +512,8 @@ def _artifact_dict(result: ToolResult, key: str) -> dict[str, Any]:
 def create_default_fetcher() -> RecipeFetcher:
     """Create the default network-first HTTP fetcher for CLI runs."""
     return CurlCffiFetcher()
+
+
+def create_default_probe() -> PlaywrightNetworkProbe:
+    """Create the default short browser probe for evidence discovery."""
+    return PlaywrightNetworkProbe()

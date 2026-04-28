@@ -13,6 +13,7 @@ build/
 !.env.example
 .tmp/
 *.jsonl
+evidence.json
 recipe.yaml
 repaired.recipe.yaml
 report.json
