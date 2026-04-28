@@ -83,10 +83,15 @@ auto.report.json         # stable machine-readable report
 The JSON report includes:
 
 - final success/failure status
+- `command_type` (`compile` or `auto`)
+- `failure_phase` for quick triage (`probe`, `generate`, `final_test`, or empty on success)
+- ordered `phase_diagnostics` for `probe -> generate -> initial_test -> repair -> final_test`
 - recipe/output paths
 - initial and final crawl results
 - bounded/redacted diagnostic samples
-- failure classifications such as `success`, `extraction_failed`, `http_error`, `no_response`, and `challenge_detected`
+- failure classifications such as `success`, `extraction_failed`, `http_error`, `no_response`, `challenge_detected`, `probe_failed`, and `no_endpoint_candidates`
+
+In `--json` mode, stdout is reserved for one machine-readable JSON object. Human-readable failures are written to stderr. Exit code `2` still writes `auto.report.json` so agents can inspect the failure.
 
 ## Evidence format
 

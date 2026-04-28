@@ -29,6 +29,21 @@ class FakeProbe:
         )
 
 
+class EmptyProbe:
+    def probe(self, url: str, goal: str) -> EvidenceBundle:
+        return EvidenceBundle(
+            target_url=url,
+            goal=goal,
+            events=(),
+            observations=("captured 0 browser network event(s)",),
+        )
+
+
+class SensitiveFailingProbe:
+    def probe(self, url: str, goal: str) -> EvidenceBundle:
+        raise RuntimeError("navigation failed token=abcdef123456")
+
+
 class ProductApiFetcher:
     def fetch(self, request: RequestSpec) -> FetchResponse:
         return FetchResponse(
@@ -36,6 +51,17 @@ class ProductApiFetcher:
             status_code=200,
             headers={"content-type": "application/json"},
             body_text=json.dumps({"items": [{"name": "Keyboard", "price": 120}]}),
+            elapsed_ms=3,
+        )
+
+
+class EmptyApiFetcher:
+    def fetch(self, request: RequestSpec) -> FetchResponse:
+        return FetchResponse(
+            url=request.url,
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_text=json.dumps({"products": []}),
             elapsed_ms=3,
         )
 
@@ -91,6 +117,16 @@ def test_compile_command_probes_then_auto_compiles_with_defaults(
     )
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["ok"] is True
+    assert report["command_type"] == "compile"
+    assert report["failure_phase"] == ""
+    assert [phase["name"] for phase in report["phase_diagnostics"]] == [
+        "probe",
+        "generate",
+        "initial_test",
+        "repair",
+        "final_test",
+    ]
+    assert all(phase["status"] == "success" for phase in report["phase_diagnostics"])
     assert report["evidence_path"] == str(evidence_path)
     assert report["final_crawl_result"]["items_written"] == 1
 
@@ -129,6 +165,153 @@ def test_compile_command_json_mode_prints_only_machine_readable_report(
     assert exit_code == 0
     stdout_report = json.loads(capsys.readouterr().out)
     assert stdout_report["ok"] is True
+    assert stdout_report["command_type"] == "compile"
+    assert stdout_report["failure_phase"] == ""
     assert stdout_report["evidence_path"] == str(evidence_path)
     assert stdout_report["final_crawl_result"]["items_written"] == 1
     assert json.loads(report_path.read_text(encoding="utf-8")) == stdout_report
+
+
+def test_compile_command_json_mode_reports_no_endpoint_candidates(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    evidence_path = tmp_path / "evidence.json"
+    report_path = tmp_path / "auto.report.json"
+    monkeypatch.setattr(cli_main, "create_default_probe", lambda: EmptyProbe())
+    monkeypatch.setattr(cli_main, "create_default_fetcher", lambda: ProductApiFetcher())
+
+    exit_code = cli_main.main(
+        [
+            "compile",
+            "https://example.test/products",
+            "--goal",
+            "collect products",
+            "--evidence",
+            str(evidence_path),
+            "--recipe",
+            str(tmp_path / "recipe.yaml"),
+            "--repaired-recipe",
+            str(tmp_path / "repaired.recipe.yaml"),
+            "--test-output",
+            str(tmp_path / "test.jsonl"),
+            "--output",
+            str(tmp_path / "crawl.jsonl"),
+            "--report",
+            str(report_path),
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    stdout_report = json.loads(captured.out)
+    assert exit_code == 2
+    assert stdout_report["ok"] is False
+    assert stdout_report["command_type"] == "compile"
+    assert stdout_report["failure_phase"] == "generate"
+    assert stdout_report["failure_classification"] == {
+        "category": "no_endpoint_candidates",
+        "retryable": True,
+        "requires_human": False,
+    }
+    assert stdout_report["evidence_path"] == str(evidence_path)
+    expected_summary = (
+        "no useful network endpoint candidates were captured; inspect evidence or retry "
+        "probe with an authorized target"
+    )
+    assert stdout_report["phase_diagnostics"] == [
+        {
+            "name": "probe",
+            "status": "success",
+            "summary": "captured 0 network event(s)",
+        },
+        {
+            "name": "generate",
+            "status": "failed",
+            "summary": expected_summary,
+        },
+    ]
+    assert "no useful network endpoint candidates" in captured.err
+    assert json.loads(report_path.read_text(encoding="utf-8")) == stdout_report
+
+
+def test_compile_command_json_mode_reports_final_test_failure_phase(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    evidence_path = tmp_path / "evidence.json"
+    report_path = tmp_path / "auto.report.json"
+    monkeypatch.setattr(cli_main, "create_default_probe", lambda: FakeProbe())
+    monkeypatch.setattr(cli_main, "create_default_fetcher", lambda: EmptyApiFetcher())
+
+    exit_code = cli_main.main(
+        [
+            "compile",
+            "https://example.test/products",
+            "--evidence",
+            str(evidence_path),
+            "--recipe",
+            str(tmp_path / "recipe.yaml"),
+            "--repaired-recipe",
+            str(tmp_path / "repaired.recipe.yaml"),
+            "--test-output",
+            str(tmp_path / "test.jsonl"),
+            "--output",
+            str(tmp_path / "crawl.jsonl"),
+            "--report",
+            str(report_path),
+            "--json",
+        ]
+    )
+
+    stdout_report = json.loads(capsys.readouterr().out)
+    assert exit_code == 2
+    assert stdout_report["ok"] is False
+    assert stdout_report["failure_phase"] == "final_test"
+    assert stdout_report["phase_diagnostics"][-1]["name"] == "final_test"
+    assert stdout_report["phase_diagnostics"][-1]["status"] == "failed"
+    assert stdout_report["final_failure_classification"]["category"] == "extraction_failed"
+    assert json.loads(report_path.read_text(encoding="utf-8")) == stdout_report
+
+
+def test_compile_command_json_mode_redacts_probe_failure_summary(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    report_path = tmp_path / "auto.report.json"
+    monkeypatch.setattr(cli_main, "create_default_probe", lambda: SensitiveFailingProbe())
+
+    exit_code = cli_main.main(
+        [
+            "compile",
+            "https://example.test/products",
+            "--evidence",
+            str(tmp_path / "evidence.json"),
+            "--recipe",
+            str(tmp_path / "recipe.yaml"),
+            "--repaired-recipe",
+            str(tmp_path / "repaired.recipe.yaml"),
+            "--test-output",
+            str(tmp_path / "test.jsonl"),
+            "--output",
+            str(tmp_path / "crawl.jsonl"),
+            "--report",
+            str(report_path),
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    stdout_report = json.loads(captured.out)
+    report_text = report_path.read_text(encoding="utf-8")
+    assert exit_code == 2
+    assert stdout_report["failure_phase"] == "probe"
+    assert stdout_report["failure_classification"]["category"] == "probe_failed"
+    assert "abcdef123456" not in captured.err
+    assert "abcdef123456" not in captured.out
+    assert "abcdef123456" not in report_text
+    assert "token=[REDACTED]" in captured.err
+    assert json.loads(report_text) == stdout_report

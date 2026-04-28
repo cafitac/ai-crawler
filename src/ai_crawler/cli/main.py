@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from ai_crawler.core.evidence import EvidenceLoader
 from ai_crawler.core.models import AgentAction, EvidenceBundle, Recipe, ToolResult
 from ai_crawler.core.recipes import RecipeLoader
 from ai_crawler.core.runner import RecipeFetcher, RecipeRunner, RunnerConfig
+from ai_crawler.core.security import redact_text
 from ai_crawler.mcp.config import SUPPORTED_CLIENTS, build_client_config
 
 DEFAULT_RUN_OUTPUT = "crawl.jsonl"
@@ -362,14 +364,71 @@ def compile_command(
     normalized_initial_output = str(Path(initial_output_path).resolve())
     normalized_final_output = str(Path(final_output_path).resolve())
     normalized_report_path = str(Path(report_path).resolve())
-    evidence = create_default_probe().probe(url=url, goal=goal)
+    try:
+        evidence = create_default_probe().probe(url=url, goal=goal)
+    except Exception as error:
+        report = _write_compile_failure_report(
+            report_path=normalized_report_path,
+            url=url,
+            goal=goal,
+            evidence_path=normalized_evidence_path,
+            recipe_path=normalized_recipe_path,
+            repaired_recipe_path=normalized_repaired_path,
+            output_path=normalized_final_output,
+            failure_phase="probe",
+            summary=_probe_failure_summary(error),
+            phase_diagnostics=[
+                {
+                    "name": "probe",
+                    "status": "failed",
+                    "summary": _probe_failure_summary(error),
+                }
+            ],
+            failure_classification={
+                "category": "probe_failed",
+                "retryable": True,
+                "requires_human": False,
+            },
+        )
+        return _emit_compile_failure(report=report, json_output=json_output)
+
     _write_evidence_json(evidence=evidence, output_path=normalized_evidence_path)
-    result = AutoRecipeCompiler(fetcher=create_default_fetcher()).compile(
-        evidence=evidence,
-        recipe_name=name,
-        initial_output_path=normalized_initial_output,
-        final_output_path=normalized_final_output,
-    )
+    try:
+        result = AutoRecipeCompiler(fetcher=create_default_fetcher()).compile(
+            evidence=evidence,
+            recipe_name=name,
+            initial_output_path=normalized_initial_output,
+            final_output_path=normalized_final_output,
+        )
+    except ValueError as error:
+        if "no endpoint candidates" not in str(error):
+            raise
+        summary = _no_endpoint_candidates_summary()
+        report = _write_compile_failure_report(
+            report_path=normalized_report_path,
+            url=url,
+            goal=goal,
+            evidence_path=normalized_evidence_path,
+            recipe_path=normalized_recipe_path,
+            repaired_recipe_path=normalized_repaired_path,
+            output_path=normalized_final_output,
+            failure_phase="generate",
+            summary=summary,
+            phase_diagnostics=[
+                _probe_phase_diagnostic(evidence),
+                {
+                    "name": "generate",
+                    "status": "failed",
+                    "summary": summary,
+                },
+            ],
+            failure_classification={
+                "category": "no_endpoint_candidates",
+                "retryable": True,
+                "requires_human": False,
+            },
+        )
+        return _emit_compile_failure(report=report, json_output=json_output)
     _write_recipe_yaml(recipe=result.recipe, output_path=normalized_recipe_path)
     _write_recipe_yaml(recipe=result.repaired_recipe, output_path=normalized_repaired_path)
     report = _write_auto_report(
@@ -379,6 +438,9 @@ def compile_command(
         repaired_recipe_path=normalized_repaired_path,
         output_path=normalized_final_output,
         evidence_path=normalized_evidence_path,
+        command_type="compile",
+        failure_phase=_auto_failure_phase(result),
+        phase_diagnostics=_compile_phase_diagnostics(evidence=evidence, result=result),
     )
     if json_output:
         print(json.dumps(report, ensure_ascii=False))
@@ -503,6 +565,9 @@ def auto_command(
         recipe_path=normalized_recipe_path,
         repaired_recipe_path=normalized_repaired_path,
         output_path=normalized_final_output,
+        command_type="auto",
+        failure_phase=_auto_failure_phase(result),
+        phase_diagnostics=_auto_phase_diagnostics(result),
     )
     if json_output:
         print(json.dumps(report, ensure_ascii=False))
@@ -568,6 +633,9 @@ def _write_auto_report(
     repaired_recipe_path: str,
     output_path: str,
     evidence_path: str | None = None,
+    command_type: str = "auto",
+    failure_phase: str = "",
+    phase_diagnostics: list[dict[str, object]] | None = None,
 ) -> dict[str, Any]:
     report = _auto_report_payload(
         result=result,
@@ -575,6 +643,9 @@ def _write_auto_report(
         repaired_recipe_path=repaired_recipe_path,
         output_path=output_path,
         evidence_path=evidence_path,
+        command_type=command_type,
+        failure_phase=failure_phase,
+        phase_diagnostics=phase_diagnostics or _auto_phase_diagnostics(result),
     )
     target = Path(report_path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -591,9 +662,15 @@ def _auto_report_payload(
     repaired_recipe_path: str,
     output_path: str,
     evidence_path: str | None = None,
+    command_type: str = "auto",
+    failure_phase: str = "",
+    phase_diagnostics: list[dict[str, object]] | None = None,
 ) -> dict[str, Any]:
     report = {
         "ok": result.ok,
+        "command_type": command_type,
+        "failure_phase": failure_phase,
+        "phase_diagnostics": phase_diagnostics or _auto_phase_diagnostics(result),
         "summary": result.summary,
         "recipe_path": recipe_path,
         "repaired_recipe_path": repaired_recipe_path,
@@ -608,6 +685,122 @@ def _auto_report_payload(
     if evidence_path is not None:
         report["evidence_path"] = evidence_path
     return report
+
+
+def _write_compile_failure_report(
+    report_path: str,
+    url: str,
+    goal: str,
+    evidence_path: str,
+    recipe_path: str,
+    repaired_recipe_path: str,
+    output_path: str,
+    failure_phase: str,
+    summary: str,
+    phase_diagnostics: list[dict[str, object]],
+    failure_classification: dict[str, object],
+) -> dict[str, Any]:
+    report = {
+        "ok": False,
+        "command_type": "compile",
+        "target_url": url,
+        "goal": goal,
+        "failure_phase": failure_phase,
+        "failure_classification": failure_classification,
+        "phase_diagnostics": phase_diagnostics,
+        "summary": summary,
+        "evidence_path": evidence_path,
+        "recipe_path": recipe_path,
+        "repaired_recipe_path": repaired_recipe_path,
+        "output_path": output_path,
+    }
+    target = Path(report_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return report
+
+
+def _emit_compile_failure(report: dict[str, Any], json_output: bool) -> int:
+    print(f"ai-crawler compile failed: {report['summary']}", file=sys.stderr)
+    if json_output:
+        print(json.dumps(report, ensure_ascii=False))
+    return 2
+
+
+def _compile_phase_diagnostics(
+    evidence: EvidenceBundle,
+    result: AutoCompileResult,
+) -> list[dict[str, object]]:
+    return [_probe_phase_diagnostic(evidence), *_auto_phase_diagnostics(result)]
+
+
+def _auto_phase_diagnostics(result: AutoCompileResult) -> list[dict[str, object]]:
+    return [
+        {
+            "name": "generate",
+            "status": "success",
+            "summary": f"generated initial recipe: {result.recipe.name}",
+        },
+        {
+            "name": "initial_test",
+            "status": "success",
+            "summary": _test_phase_summary(result.initial_test_report),
+        },
+        {
+            "name": "repair",
+            "status": "success",
+            "summary": f"selected final recipe: {result.repaired_recipe.name}",
+        },
+        {
+            "name": "final_test",
+            "status": "success" if result.ok else "failed",
+            "summary": _test_phase_summary(result.final_test_report),
+        },
+    ]
+
+
+def _auto_failure_phase(result: AutoCompileResult) -> str:
+    if result.ok:
+        return ""
+    return "final_test"
+
+
+def _probe_phase_diagnostic(evidence: EvidenceBundle) -> dict[str, object]:
+    return {
+        "name": "probe",
+        "status": "success",
+        "summary": f"captured {len(evidence.events)} network event(s)",
+    }
+
+
+def _test_phase_summary(test_report: dict[str, object]) -> str:
+    classification = test_report.get("failure_classification", {})
+    category = "unknown"
+    if isinstance(classification, dict):
+        raw_category = classification.get("category", "unknown")
+        if isinstance(raw_category, str) and raw_category:
+            category = raw_category
+    failure_reason = test_report.get("failure_reason", "")
+    if isinstance(failure_reason, str) and failure_reason:
+        return f"classification={category} reason={failure_reason}"
+    return f"classification={category}"
+
+
+def _probe_failure_summary(error: Exception) -> str:
+    message = redact_text(str(error))
+    if message:
+        return f"browser probe failed: {message}"
+    return "browser probe failed; install browser support and verify the target is reachable"
+
+
+def _no_endpoint_candidates_summary() -> str:
+    return (
+        "no useful network endpoint candidates were captured; inspect evidence or retry probe "
+        "with an authorized target"
+    )
 
 
 def _load_json_object(path: str) -> dict[str, Any]:

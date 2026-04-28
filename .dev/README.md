@@ -59,7 +59,7 @@ AI is not the request loop. AI is the planner/debugger/recipe author.
    - AI가 어떤 방식으로 진행을 주도하는지
 
 6. `03-ai/auto-harness-contract.md`
-   - AI harness가 호출할 `auto --json` stdout/report schema와 exit code 정책
+   - AI harness가 호출할 `compile --json` / `auto --json` stdout/report schema와 exit code 정책
 
 7. `03-ai/communication.md`
    - LLM Provider, MCP, Agent Adapter 통신 방식
