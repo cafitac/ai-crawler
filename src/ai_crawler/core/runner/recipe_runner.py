@@ -1,6 +1,8 @@
 """Deterministic recipe runner."""
 
 import json
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -8,6 +10,7 @@ from pydantic import Field
 
 from ai_crawler.core.models import CrawlResult, FetchResponse, Recipe, RequestSpec
 from ai_crawler.core.models.base import DomainModel
+from ai_crawler.core.models.recipe import RunnerStopReason
 from ai_crawler.core.runner.extraction import extract_items
 
 
@@ -30,6 +33,8 @@ class RecipeRunner:
     def __init__(self, fetcher: RecipeFetcher, config: RunnerConfig) -> None:
         self._fetcher = fetcher
         self._config = config
+        self._clock = time.monotonic
+        self._sleep = time.sleep
 
     def run(self, recipe: Recipe) -> CrawlResult:
         """Execute a recipe and write extracted items as JSON Lines."""
@@ -37,23 +42,87 @@ class RecipeRunner:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         items_written = 0
+        pages_attempted = 0
+        requests_attempted = 0
+        stop_reason: RunnerStopReason = "completed"
+        started_at = self._clock()
+        max_items = recipe.execution.max_items
+        max_seconds = recipe.execution.max_seconds
+        delay_ms = recipe.execution.delay_ms
         with output_path.open("w", encoding="utf-8") as output_file:
             for request in _expand_requests(recipe):
-                response = self._fetcher.fetch(request)
-                if not _is_success(response):
+                if _max_seconds_reached(self._clock, started_at, max_seconds, pages_attempted):
+                    stop_reason = "max_seconds_reached"
+                    break
+                _sleep_between_requests(self._sleep, delay_ms, pages_attempted)
+                if _max_seconds_reached(self._clock, started_at, max_seconds, pages_attempted):
+                    stop_reason = "max_seconds_reached"
+                    break
+                pages_attempted += 1
+                response, request_attempts, stop_reason = self._fetch_with_retries(
+                    request=request,
+                    recipe=recipe,
+                    started_at=started_at,
+                )
+                requests_attempted += request_attempts
+                if response is None or stop_reason == "non_success_status":
                     break
                 extracted_items = _extract_response_items(response, recipe)
                 for item in extracted_items:
                     output_file.write(json.dumps(item, ensure_ascii=False) + "\n")
                     items_written += 1
+                    if max_items is not None and items_written >= max_items:
+                        stop_reason = "max_items_reached"
+                        break
+                if stop_reason == "max_items_reached":
+                    break
                 if not extracted_items:
+                    stop_reason = "empty_page"
                     break
 
         return CrawlResult(
             recipe_name=recipe.name,
             items_written=items_written,
             output_path=str(output_path),
+            pages_attempted=pages_attempted,
+            requests_attempted=requests_attempted,
+            stop_reason=stop_reason,
         )
+
+    def _fetch_with_retries(
+        self,
+        request: RequestSpec,
+        recipe: Recipe,
+        started_at: float,
+    ) -> tuple[FetchResponse | None, int, RunnerStopReason]:
+        attempts = 0
+        retry_attempts = recipe.execution.retry_attempts
+        retry_backoff_ms = recipe.execution.retry_backoff_ms
+        retry_statuses = set(recipe.execution.retry_statuses)
+        while True:
+            attempts += 1
+            try:
+                response = self._fetcher.fetch(request)
+            except Exception:
+                if attempts > retry_attempts or _max_seconds_reached_during_retry(
+                    self._clock,
+                    started_at,
+                    recipe,
+                ):
+                    return None, attempts, "retry_exhausted"
+                _sleep_before_retry(self._sleep, retry_backoff_ms, attempts)
+                continue
+            if _is_success(response):
+                return response, attempts, "completed"
+            if response.status_code not in retry_statuses:
+                return response, attempts, "non_success_status"
+            if attempts > retry_attempts or _max_seconds_reached_during_retry(
+                self._clock,
+                started_at,
+                recipe,
+            ):
+                return None, attempts, "retry_exhausted"
+            _sleep_before_retry(self._sleep, retry_backoff_ms, attempts)
 
 
 def _expand_requests(recipe: Recipe) -> tuple[RequestSpec, ...]:
@@ -82,6 +151,48 @@ def _request_for_page(request: RequestSpec, query_param: str, page: int) -> Requ
 
 def _is_success(response: FetchResponse) -> bool:
     return 200 <= response.status_code < 300
+
+
+def _max_seconds_reached(
+    clock: Callable[[], float],
+    started_at: float,
+    max_seconds: int | None,
+    pages_attempted: int,
+) -> bool:
+    return (
+        max_seconds is not None
+        and pages_attempted > 0
+        and clock() - started_at >= max_seconds
+    )
+
+
+def _max_seconds_reached_during_retry(
+    clock: Callable[[], float],
+    started_at: float,
+    recipe: Recipe,
+) -> bool:
+    max_seconds = recipe.execution.max_seconds
+    return max_seconds is not None and clock() - started_at >= max_seconds
+
+
+def _sleep_between_requests(
+    sleep_fn: Callable[[float], object],
+    delay_ms: int,
+    pages_attempted: int,
+) -> None:
+    if delay_ms <= 0 or pages_attempted <= 0:
+        return
+    sleep_fn(delay_ms / 1000)
+
+
+def _sleep_before_retry(
+    sleep_fn: Callable[[float], object],
+    retry_backoff_ms: int,
+    attempts: int,
+) -> None:
+    if retry_backoff_ms <= 0:
+        return
+    sleep_fn((retry_backoff_ms * attempts) / 1000)
 
 
 def _extract_response_items(

@@ -1,10 +1,10 @@
 """Agent tool for deterministic recipe test runs."""
-
 from pydantic import ValidationError
 
 from ai_crawler.core.diagnostics import classify_test_report
 from ai_crawler.core.models import (
     AgentAction,
+    CrawlResult,
     EvidenceBundle,
     FetchResponse,
     Recipe,
@@ -51,7 +51,7 @@ class TestRecipeTool:
             ),
             artifacts={
                 "crawl_result": crawl_result.model_dump(mode="json"),
-                "test_report": _test_report(recording_fetcher, crawl_result.items_written),
+                "test_report": _test_report(recording_fetcher, crawl_result),
             },
         )
 
@@ -84,31 +84,33 @@ def _load_recipe_artifact(action: AgentAction) -> Recipe | InvalidRecipeArtifact
         return InvalidRecipeArtifact()
 
 
-def _test_report(fetcher: RecordingRecipeFetcher, items_written: int) -> dict[str, object]:
+def _test_report(fetcher: RecordingRecipeFetcher, crawl_result: CrawlResult) -> dict[str, object]:
     response = fetcher.first_response
-    if response is None:
-        report: dict[str, object] = {
-            "first_response_status": 0,
-            "content_type": "",
-            "body_sample": "",
-            "failure_reason": "no_response",
-        }
-        report["failure_classification"] = classify_test_report(report)
-        return report
-    report = {
-        "first_response_status": response.status_code,
-        "content_type": response.headers.get("content-type", ""),
-        "body_sample": _body_sample(response.body_text),
-        "failure_reason": _failure_reason(response=response, items_written=items_written),
+    report: dict[str, object] = {
+        "first_response_status": 0,
+        "content_type": "",
+        "body_sample": "",
+        "stop_reason": crawl_result.stop_reason,
+        "pages_attempted": crawl_result.pages_attempted,
+        "requests_attempted": crawl_result.requests_attempted,
+        "failure_reason": _failure_reason(response=response, crawl_result=crawl_result),
     }
+    if response is not None:
+        report["first_response_status"] = response.status_code
+        report["content_type"] = response.headers.get("content-type", "")
+        report["body_sample"] = _body_sample(response.body_text)
     report["failure_classification"] = classify_test_report(report)
     return report
 
 
-def _failure_reason(response: FetchResponse, items_written: int) -> str:
+def _failure_reason(response: FetchResponse | None, crawl_result: CrawlResult) -> str:
+    if crawl_result.stop_reason == "retry_exhausted":
+        return "retry_exhausted"
+    if response is None:
+        return "no_response"
     if not 200 <= response.status_code < 300:
         return "non_success_status"
-    if items_written == 0:
+    if crawl_result.items_written == 0:
         return "no_items_extracted"
     return ""
 

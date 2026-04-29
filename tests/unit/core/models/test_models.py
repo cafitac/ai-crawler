@@ -5,6 +5,7 @@ from ai_crawler.core.models import (
     AgentAction,
     CrawlResult,
     EvidenceBundle,
+    ExecutionSpec,
     FailureReport,
     FetchResponse,
     NetworkEvent,
@@ -74,17 +75,85 @@ def test_agent_action_and_tool_result_round_trip() -> None:
     assert restored_result == result
 
 
+def test_execution_spec_supports_runner_hardening_fields() -> None:
+    execution = ExecutionSpec(
+        concurrency=1,
+        delay_ms=250,
+        max_items=100,
+        max_seconds=45,
+        retry_attempts=2,
+        retry_backoff_ms=500,
+        retry_statuses=(500, 502, 503, 504),
+        checkpoint_path=".state/products.checkpoint.json",
+    )
+
+    assert execution.max_items == 100
+    assert execution.max_seconds == 45
+    assert execution.retry_attempts == 2
+    assert execution.retry_backoff_ms == 500
+    assert execution.retry_statuses == (500, 502, 503, 504)
+    assert execution.checkpoint_path == ".state/products.checkpoint.json"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("max_items", -1),
+        ("max_seconds", 0),
+        ("retry_attempts", -1),
+        ("retry_backoff_ms", -1),
+    ],
+)
+def test_execution_spec_rejects_invalid_runner_hardening_values(
+    field_name: str,
+    value: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        ExecutionSpec(**{field_name: value})
+
+
+@pytest.mark.parametrize("retry_statuses", [(199,), (600,), (500, 500)])
+def test_execution_spec_rejects_invalid_retry_statuses(retry_statuses: tuple[int, ...]) -> None:
+    with pytest.raises(ValidationError):
+        ExecutionSpec(retry_statuses=retry_statuses)
+
+
 def test_recipe_crawl_result_and_failure_report_are_explicit_models() -> None:
     recipe = Recipe(
         name="example-products",
         start_url="https://example.com/products",
         requests=("GET https://example.com/api/products?page=1",),
     )
-    crawl_result = CrawlResult(recipe_name=recipe.name, items_written=2, output_path="out.jsonl")
+    crawl_result = CrawlResult(
+        recipe_name=recipe.name,
+        items_written=2,
+        output_path="out.jsonl",
+        pages_attempted=2,
+        requests_attempted=2,
+        stop_reason="completed",
+        checkpoint_path=".state/example-products.checkpoint.json",
+    )
     failure = FailureReport(code="challenge_detected", message="manual handoff required")
 
     assert recipe.requests == (
         RequestSpec(method="GET", url="https://example.com/api/products?page=1"),
     )
     assert crawl_result.items_written == 2
+    assert crawl_result.pages_attempted == 2
+    assert crawl_result.requests_attempted == 2
+    assert crawl_result.stop_reason == "completed"
+    assert crawl_result.checkpoint_path == ".state/example-products.checkpoint.json"
     assert failure.retryable is False
+
+
+@pytest.mark.parametrize("stop_reason", ["", "unknown_stop_reason"])
+def test_crawl_result_rejects_unknown_stop_reason(stop_reason: str) -> None:
+    with pytest.raises(ValidationError):
+        CrawlResult(
+            recipe_name="example-products",
+            items_written=0,
+            output_path="out.jsonl",
+            pages_attempted=0,
+            requests_attempted=0,
+            stop_reason=stop_reason,
+        )

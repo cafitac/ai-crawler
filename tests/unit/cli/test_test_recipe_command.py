@@ -69,11 +69,18 @@ extract:
         "recipe_name": "products-api",
         "items_written": 1,
         "output_path": str(output_path),
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "completed",
+        "checkpoint_path": "",
     }
     assert report["test_report"] == {
         "first_response_status": 200,
         "content_type": "application/json",
         "body_sample": '{"items": [{"name": "Keyboard", "price": 120}]}',
+        "stop_reason": "completed",
+        "pages_attempted": 1,
+        "requests_attempted": 1,
         "failure_reason": "",
         "failure_classification": {
             "category": "success",

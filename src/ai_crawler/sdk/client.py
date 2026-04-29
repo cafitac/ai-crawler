@@ -96,7 +96,8 @@ class AICrawler:
             "recipe_path": normalized_output,
             "recipe": recipe.model_dump(mode="json"),
         }
-        return SDKResult(ok=True, exit_code=0, summary=report["summary"], report=report)
+        summary = f"generated recipe: {recipe.name}"
+        return SDKResult(ok=True, exit_code=0, summary=summary, report=report)
 
     def test_recipe(
         self,

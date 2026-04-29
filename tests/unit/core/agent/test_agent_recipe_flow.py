@@ -143,6 +143,10 @@ def test_agent_controller_hands_generated_recipe_artifact_to_test_recipe_tool(tm
         "recipe_name": "products-api",
         "items_written": 0,
         "output_path": str(output_path),
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "empty_page",
+        "checkpoint_path": "",
     }
     assert len(fetcher.requests) == 1
     assert fetcher.requests[0].url == "https://example.test/api/products"

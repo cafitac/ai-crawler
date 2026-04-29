@@ -47,7 +47,8 @@ extract:
 
     assert exit_code == 0
     assert capsys.readouterr().out.strip() == (
-        f"ai-crawler run: recipe=products-api items_written=1 output={output_path}"
+        "ai-crawler run: "
+        f"recipe=products-api items_written=1 stop_reason=completed output={output_path}"
     )
     assert output_path.read_text(encoding="utf-8") == (
         '{"name": "Keyboard", "price": 120}\n'
