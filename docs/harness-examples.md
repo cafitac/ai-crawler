@@ -13,9 +13,9 @@ Run these from outside the repo to confirm the published package is usable:
 ```bash
 tmpdir=$(mktemp -d)
 cd "$tmpdir"
-npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- --version
-npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- doctor
-npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- mcp-config --client hermes --launcher npm
+npm exec --yes --package @cafitac/ai-crawler@0.1.2 ai-crawler -- --version
+npm exec --yes --package @cafitac/ai-crawler@0.1.2 ai-crawler -- doctor
+npm exec --yes --package @cafitac/ai-crawler@0.1.2 ai-crawler -- mcp-config --client hermes --launcher npm
 ```
 
 Expected shape:
@@ -64,7 +64,7 @@ uv run --extra mcp --extra http ai-crawler mcp
 Or through the published wrapper:
 
 ```bash
-npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- mcp
+npm exec --yes --package @cafitac/ai-crawler@0.1.2 ai-crawler -- mcp
 ```
 
 ## 3. Python SDK compile_url flow
