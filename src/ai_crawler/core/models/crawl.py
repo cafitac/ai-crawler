@@ -3,6 +3,7 @@
 from pydantic import Field
 
 from ai_crawler.core.models.base import DomainModel
+from ai_crawler.core.models.recipe import RunnerStopReason
 
 
 class CrawlResult(DomainModel):
@@ -11,3 +12,7 @@ class CrawlResult(DomainModel):
     recipe_name: str = Field(min_length=1)
     items_written: int = Field(ge=0)
     output_path: str = Field(min_length=1)
+    pages_attempted: int = Field(default=0, ge=0)
+    requests_attempted: int = Field(default=0, ge=0)
+    stop_reason: RunnerStopReason = "completed"
+    checkpoint_path: str = ""

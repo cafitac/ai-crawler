@@ -69,6 +69,10 @@ extract:
         "recipe_name": "products-api",
         "items_written": 1,
         "output_path": str(output_path),
+        "pages_attempted": 0,
+        "requests_attempted": 0,
+        "stop_reason": "completed",
+        "checkpoint_path": "",
     }
     assert report["test_report"] == {
         "first_response_status": 200,

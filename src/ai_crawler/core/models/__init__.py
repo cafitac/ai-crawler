@@ -10,6 +10,7 @@ from ai_crawler.core.models.recipe import (
     ExtractSpec,
     PaginationSpec,
     Recipe,
+    RunnerStopReason,
     ValidationSpec,
 )
 from ai_crawler.core.models.request import FetchOptions, RequestSpec
@@ -31,6 +32,7 @@ __all__ = [
     "PaginationSpec",
     "Recipe",
     "RequestSpec",
+    "RunnerStopReason",
     "ToolResult",
     "ValidationSpec",
 ]
