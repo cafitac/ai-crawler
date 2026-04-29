@@ -37,22 +37,32 @@ class RecipeRunner:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         items_written = 0
+        pages_attempted = 0
+        requests_attempted = 0
+        stop_reason = "completed"
         with output_path.open("w", encoding="utf-8") as output_file:
             for request in _expand_requests(recipe):
+                pages_attempted += 1
+                requests_attempted += 1
                 response = self._fetcher.fetch(request)
                 if not _is_success(response):
+                    stop_reason = "non_success_status"
                     break
                 extracted_items = _extract_response_items(response, recipe)
                 for item in extracted_items:
                     output_file.write(json.dumps(item, ensure_ascii=False) + "\n")
                     items_written += 1
                 if not extracted_items:
+                    stop_reason = "empty_page"
                     break
 
         return CrawlResult(
             recipe_name=recipe.name,
             items_written=items_written,
             output_path=str(output_path),
+            pages_attempted=pages_attempted,
+            requests_attempted=requests_attempted,
+            stop_reason=stop_reason,
         )
 
 

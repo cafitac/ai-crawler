@@ -64,6 +64,10 @@ def test_recipe_runner_executes_query_page_pagination_to_jsonl(tmp_path: Path) -
     assert result.recipe_name == "products-api"
     assert result.items_written == 3
     assert result.output_path == str(output_path)
+    assert result.pages_attempted == 3
+    assert result.requests_attempted == 3
+    assert result.stop_reason == "empty_page"
+    assert result.checkpoint_path == ""
     assert fetcher.urls == [
         "https://example.test/api/products?page=1",
         "https://example.test/api/products?page=2",
@@ -105,4 +109,7 @@ def test_recipe_runner_stops_on_non_success_response(tmp_path: Path) -> None:
     result = runner.run(recipe)
 
     assert result.items_written == 0
+    assert result.pages_attempted == 1
+    assert result.requests_attempted == 1
+    assert result.stop_reason == "non_success_status"
     assert output_path.read_text(encoding="utf-8") == ""

@@ -59,8 +59,8 @@ def test_test_recipe_tool_runs_recipe_and_returns_crawl_result_artifact(tmp_path
         "recipe_name": "products-api",
         "items_written": 1,
         "output_path": str(output_path),
-        "pages_attempted": 0,
-        "requests_attempted": 0,
+        "pages_attempted": 1,
+        "requests_attempted": 1,
         "stop_reason": "completed",
         "checkpoint_path": "",
     }
