@@ -50,5 +50,15 @@ def test_mcp_auto_compile_tool_returns_harness_report(tmp_path) -> None:
     )
 
     assert report["ok"] is True
+    assert report["command_type"] == "auto"
+    assert report["failure_phase"] == ""
+    assert [phase["name"] for phase in report["phase_diagnostics"]] == [
+        "generate",
+        "initial_test",
+        "repair",
+        "final_test",
+    ]
+    assert all(phase["status"] == "success" for phase in report["phase_diagnostics"])
+    assert report["evidence_path"] == str(evidence_path.resolve())
     assert report["final_crawl_result"]["items_written"] == 1
     assert report["final_failure_classification"]["category"] == "success"

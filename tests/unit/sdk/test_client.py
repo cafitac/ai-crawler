@@ -56,6 +56,16 @@ def test_sdk_auto_compiles_from_evidence_file_and_returns_report(tmp_path) -> No
     assert result.ok is True
     assert result.exit_code == 0
     assert result.report["ok"] is True
+    assert result.report["command_type"] == "auto"
+    assert result.report["failure_phase"] == ""
+    assert [phase["name"] for phase in result.report["phase_diagnostics"]] == [
+        "generate",
+        "initial_test",
+        "repair",
+        "final_test",
+    ]
+    assert all(phase["status"] == "success" for phase in result.report["phase_diagnostics"])
+    assert result.report["evidence_path"] == str(evidence_path.resolve())
     assert result.report["recipe_path"] == str(recipe_path.resolve())
     assert result.report["repaired_recipe_path"] == str(repaired_path.resolve())
     assert result.report["final_crawl_result"]["items_written"] == 1
