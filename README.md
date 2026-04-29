@@ -175,6 +175,7 @@ uv run --extra mcp --extra http ai-crawler mcp
 
 Exposed tools:
 
+- `compile_url`
 - `auto_compile`
 - `generate_recipe`
 - `test_recipe`
@@ -210,6 +211,9 @@ result = crawler.auto("evidence.json")
 print(result.ok)
 print(result.exit_code)
 print(result.report)
+
+compile_result = crawler.compile_url("https://example.com/products", goal="collect products")
+print(compile_result.report["command_type"])
 ```
 
 For tests or embedded usage, inject a fake fetcher:

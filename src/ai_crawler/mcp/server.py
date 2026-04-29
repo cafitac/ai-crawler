@@ -15,6 +15,31 @@ def build_server():
     tools = AICrawlerMCPTools()
 
     @app.tool()
+    def compile_url(
+        url: str,
+        goal: str = "collect data",
+        evidence_path: str = "evidence.json",
+        recipe_path: str = "recipe.yaml",
+        repaired_recipe_path: str = "repaired.recipe.yaml",
+        test_output_path: str = "test.jsonl",
+        output_path: str = "crawl.jsonl",
+        report_path: str = "auto.report.json",
+        name: str = "generated-recipe",
+    ) -> dict[str, object]:
+        """Probe a URL, compile a recipe, and return a harness-style report."""
+        return tools.compile_url(
+            url=url,
+            goal=goal,
+            evidence_path=evidence_path,
+            recipe_path=recipe_path,
+            repaired_recipe_path=repaired_recipe_path,
+            test_output_path=test_output_path,
+            output_path=output_path,
+            report_path=report_path,
+            name=name,
+        )
+
+    @app.tool()
     def auto_compile(
         evidence_path: str,
         recipe_path: str = "recipe.yaml",

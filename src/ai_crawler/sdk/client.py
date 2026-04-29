@@ -1,8 +1,10 @@
 """Thin application facade for CLI, MCP, and Python callers."""
 
+import json
 from pathlib import Path
 from typing import Any
 
+from ai_crawler.adapters.browser.probe import BrowserProbe, BrowserProbeConfig
 from ai_crawler.adapters.http import CurlCffiFetcher
 from ai_crawler.core.agent import (
     AutoCompileResult,
@@ -36,8 +38,13 @@ class SDKResult(DomainModel):
 class AICrawler:
     """Small public facade over ai-crawler core services."""
 
-    def __init__(self, fetcher: RecipeFetcher | None = None) -> None:
+    def __init__(
+        self,
+        fetcher: RecipeFetcher | None = None,
+        probe: BrowserProbe | None = None,
+    ) -> None:
         self._fetcher = fetcher or CurlCffiFetcher()
+        self._probe = probe
         self._evidence_loader = EvidenceLoader()
 
     def auto(
@@ -52,36 +59,46 @@ class AICrawler:
     ) -> SDKResult:
         """Compile evidence into initial/repaired recipes and final crawl output."""
         evidence = self._evidence_loader.load_file(evidence_path)
-        normalized_evidence = _resolve_path(evidence_path)
-        normalized_recipe = _resolve_path(recipe_path)
-        normalized_repaired = _resolve_path(repaired_recipe_path)
-        normalized_initial_output = _resolve_path(initial_output_path)
-        normalized_final_output = _resolve_path(final_output_path)
-        normalized_report = _resolve_path(report_path)
-        result = AutoRecipeCompiler(fetcher=self._fetcher).compile(
+        return self._auto_from_evidence_bundle(
             evidence=evidence,
-            recipe_name=name,
-            initial_output_path=normalized_initial_output,
-            final_output_path=normalized_final_output,
-        )
-        _write_recipe_yaml(recipe=result.recipe, output_path=normalized_recipe)
-        _write_recipe_yaml(recipe=result.repaired_recipe, output_path=normalized_repaired)
-        report = auto_report_payload(
-            result=result,
             command_type="auto",
-            recipe_path=normalized_recipe,
-            repaired_recipe_path=normalized_repaired,
-            output_path=normalized_final_output,
-            evidence_path=normalized_evidence,
-            failure_phase=_auto_failure_phase(result),
-            phase_diagnostics=_auto_phase_diagnostics(result),
+            evidence_path=_resolve_path(evidence_path),
+            recipe_path=recipe_path,
+            repaired_recipe_path=repaired_recipe_path,
+            initial_output_path=initial_output_path,
+            final_output_path=final_output_path,
+            report_path=report_path,
+            name=name,
         )
-        _write_json(report=report, output_path=normalized_report)
-        return SDKResult(
-            ok=result.ok,
-            exit_code=auto_exit_code(result),
-            summary=result.summary,
-            report=report,
+
+    def compile_url(
+        self,
+        url: str,
+        goal: str = "collect data",
+        evidence_path: Path | str = "evidence.json",
+        recipe_path: Path | str = DEFAULT_RECIPE,
+        repaired_recipe_path: Path | str = DEFAULT_REPAIRED_RECIPE,
+        initial_output_path: Path | str = DEFAULT_TEST_OUTPUT,
+        final_output_path: Path | str = DEFAULT_RUN_OUTPUT,
+        report_path: Path | str = DEFAULT_AUTO_REPORT,
+        name: str = "generated-recipe",
+        probe_config: BrowserProbeConfig | None = None,
+    ) -> SDKResult:
+        """Probe one URL, write evidence, and compile it into crawl artifacts."""
+        probe = self._probe or _create_default_probe(config=probe_config)
+        evidence = probe.probe(url=url, goal=goal)
+        normalized_evidence = _resolve_path(evidence_path)
+        _write_evidence_json(evidence=evidence, output_path=normalized_evidence)
+        return self._auto_from_evidence_bundle(
+            evidence=evidence,
+            command_type="compile",
+            evidence_path=normalized_evidence,
+            recipe_path=recipe_path,
+            repaired_recipe_path=repaired_recipe_path,
+            initial_output_path=initial_output_path,
+            final_output_path=final_output_path,
+            report_path=report_path,
+            name=name,
         )
 
     def generate_recipe(
@@ -176,6 +193,30 @@ class AICrawler:
         name: str = "generated-recipe",
     ) -> SDKResult:
         """Compile an in-memory evidence bundle for programmatic callers."""
+        return self._auto_from_evidence_bundle(
+            evidence=evidence,
+            command_type="auto",
+            recipe_path=recipe_path,
+            repaired_recipe_path=repaired_recipe_path,
+            initial_output_path=initial_output_path,
+            final_output_path=final_output_path,
+            report_path=report_path,
+            name=name,
+        )
+
+    def _auto_from_evidence_bundle(
+        self,
+        evidence: EvidenceBundle,
+        command_type: str,
+        recipe_path: Path | str,
+        repaired_recipe_path: Path | str,
+        initial_output_path: Path | str,
+        final_output_path: Path | str,
+        report_path: Path | str,
+        name: str,
+        evidence_path: str | None = None,
+        phase_diagnostics: list[dict[str, object]] | None = None,
+    ) -> SDKResult:
         normalized_recipe = _resolve_path(recipe_path)
         normalized_repaired = _resolve_path(repaired_recipe_path)
         normalized_initial_output = _resolve_path(initial_output_path)
@@ -187,16 +228,26 @@ class AICrawler:
             initial_output_path=normalized_initial_output,
             final_output_path=normalized_final_output,
         )
+        selected_phase_diagnostics = phase_diagnostics
+        if selected_phase_diagnostics is None:
+            if command_type == "compile":
+                selected_phase_diagnostics = _compile_phase_diagnostics(
+                    evidence=evidence,
+                    result=result,
+                )
+            else:
+                selected_phase_diagnostics = _auto_phase_diagnostics(result)
         _write_recipe_yaml(recipe=result.recipe, output_path=normalized_recipe)
         _write_recipe_yaml(recipe=result.repaired_recipe, output_path=normalized_repaired)
         report = auto_report_payload(
             result=result,
-            command_type="auto",
+            command_type=command_type,
             recipe_path=normalized_recipe,
             repaired_recipe_path=normalized_repaired,
             output_path=normalized_final_output,
+            evidence_path=evidence_path,
             failure_phase=_auto_failure_phase(result),
-            phase_diagnostics=_auto_phase_diagnostics(result),
+            phase_diagnostics=selected_phase_diagnostics,
         )
         _write_json(report=report, output_path=normalized_report)
         return SDKResult(
@@ -277,6 +328,21 @@ def _auto_phase_diagnostics(result: AutoCompileResult) -> list[dict[str, object]
     ]
 
 
+def _compile_phase_diagnostics(
+    evidence: EvidenceBundle,
+    result: AutoCompileResult,
+) -> list[dict[str, object]]:
+    return [_probe_phase_diagnostic(evidence), *_auto_phase_diagnostics(result)]
+
+
+def _probe_phase_diagnostic(evidence: EvidenceBundle) -> dict[str, object]:
+    return {
+        "name": "probe",
+        "status": "success",
+        "summary": f"captured {len(evidence.events)} network event(s)",
+    }
+
+
 def _test_phase_summary(test_report: dict[str, object]) -> str:
     classification = test_report.get("failure_classification", {})
     category = "unknown"
@@ -299,6 +365,18 @@ def tool_report_payload(result: ToolResult) -> dict[str, Any]:
     }
 
 
+def _create_default_probe(config: BrowserProbeConfig | None = None) -> BrowserProbe:
+    try:
+        from ai_crawler.adapters.browser import PlaywrightNetworkProbe
+    except ModuleNotFoundError as error:
+        msg = (
+            "Install browser support with `uv sync --extra browser` or "
+            "`pip install ai-crawler[browser]`."
+        )
+        raise RuntimeError(msg) from error
+    return PlaywrightNetworkProbe(config=config)
+
+
 def _resolve_path(path: Path | str) -> str:
     return str(Path(path).resolve())
 
@@ -314,6 +392,15 @@ def _write_recipe_yaml(recipe: Recipe, output_path: str) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
         yaml.safe_dump(recipe.model_dump(mode="json"), sort_keys=False),
+        encoding="utf-8",
+    )
+
+
+def _write_evidence_json(evidence: EvidenceBundle, output_path: str) -> None:
+    target = Path(output_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(evidence.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
