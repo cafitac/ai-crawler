@@ -89,6 +89,40 @@ test('readPackageMetadata loads wrapper metadata gitHead when present', () => {
   assert.deepEqual(metadata, {version: '0.1.1', gitHead: 'abc123'});
 });
 
+test('runCli prints wrapper help for top-level --help without spawning the core CLI', () => {
+  const calls = [];
+  const exitCode = wrapper.runCli(['--help'], {
+    packageRoot: '/repo/ai-crawler',
+    spawnSync: (...args) => {
+      calls.push(args);
+      return {status: 0};
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, []);
+});
+
+test('runCli delegates subcommand --help to the core CLI', () => {
+  const calls = [];
+  const exitCode = wrapper.runCli(['mcp-config', '--help'], {
+    packageRoot: '/repo/ai-crawler',
+    localCoreAvailable: true,
+    spawnSync: (executable, args) => {
+      calls.push({executable, args});
+      return {status: 0};
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [
+    {
+      executable: 'uv',
+      args: ['run', '--project', '/repo/ai-crawler', 'ai-crawler', 'mcp-config', '--help'],
+    },
+  ]);
+});
+
 test('packageRootFromModuleDir resolves package root from lib directory', () => {
   const packageRoot = wrapper.packageRootFromModuleDir(path.join('/repo/ai-crawler', 'lib'));
   assert.equal(packageRoot, '/repo/ai-crawler');
