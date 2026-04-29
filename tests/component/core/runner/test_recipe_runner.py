@@ -157,6 +157,38 @@ class ConcurrentTimeoutFetcher:
         )
 
 
+class ConcurrentMaxItemsFetcher:
+    def __init__(self) -> None:
+        self.urls: list[str] = []
+        self.page_two_done = threading.Event()
+        self.release_page_one = threading.Event()
+
+    def fetch(self, request: RequestSpec) -> FetchResponse:
+        page = request.query["page"]
+        self.urls.append(f"{request.url}?page={page}")
+        items_by_page = {
+            "1": [{"id": "p1", "name": "Keyboard", "price": 120}],
+            "2": [
+                {"id": "p2", "name": "Mouse", "price": 40},
+                {"id": "p3", "name": "Monitor", "price": 300},
+            ],
+            "3": [{"id": "p4", "name": "Headphones", "price": 90}],
+        }
+        if page == "1":
+            released = self.release_page_one.wait(timeout=1)
+            assert released, "page 1 should be released after page 2 completes"
+        elif page == "2":
+            self.page_two_done.set()
+            self.release_page_one.set()
+        return FetchResponse(
+            url=request.url,
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_text=json.dumps({"items": items_by_page[page]}),
+            elapsed_ms=5,
+        )
+
+
 def test_recipe_runner_executes_query_page_pagination_to_jsonl(tmp_path: Path) -> None:
     recipe = Recipe.model_validate(
         {
@@ -475,6 +507,60 @@ def test_recipe_runner_stops_after_max_items_and_keeps_partial_jsonl_valid(tmp_p
     assert result.requests_attempted == 1
     assert result.stop_reason == "max_items_reached"
     assert fetcher.urls == ["https://example.test/api/products?page=1"]
+    written_items = [
+        json.loads(line)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert written_items == [
+        {"name": "Keyboard", "price": 120},
+        {"name": "Mouse", "price": 40},
+    ]
+
+
+
+def test_recipe_runner_stops_concurrent_run_at_max_items_without_fetching_later_pages(
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "concurrent-max-items.jsonl"
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [
+                {
+                    "id": "list-products",
+                    "method": "GET",
+                    "url": "https://example.test/api/products",
+                    "query": {"page": "1"},
+                }
+            ],
+            "pagination": {
+                "strategy": "query_page",
+                "query_param": "page",
+                "start": 1,
+                "max_pages": 3,
+            },
+            "execution": {"concurrency": 2, "max_items": 2},
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    fetcher = ConcurrentMaxItemsFetcher()
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+
+    result = runner.run(recipe)
+
+    assert fetcher.page_two_done.is_set()
+    assert result.items_written == 2
+    assert result.pages_attempted == 2
+    assert result.requests_attempted == 2
+    assert result.stop_reason == "max_items_reached"
+    assert fetcher.urls == [
+        "https://example.test/api/products?page=1",
+        "https://example.test/api/products?page=2",
+    ]
     written_items = [
         json.loads(line)
         for line in output_path.read_text(encoding="utf-8").splitlines()
