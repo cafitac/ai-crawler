@@ -128,6 +128,7 @@ def test_recipe_crawl_result_and_failure_report_are_explicit_models() -> None:
         recipe_name=recipe.name,
         items_written=2,
         output_path="out.jsonl",
+        pages_scheduled=2,
         pages_attempted=2,
         requests_attempted=2,
         stop_reason="completed",
@@ -139,6 +140,7 @@ def test_recipe_crawl_result_and_failure_report_are_explicit_models() -> None:
         RequestSpec(method="GET", url="https://example.com/api/products?page=1"),
     )
     assert crawl_result.items_written == 2
+    assert crawl_result.pages_scheduled == 2
     assert crawl_result.pages_attempted == 2
     assert crawl_result.requests_attempted == 2
     assert crawl_result.stop_reason == "completed"
@@ -153,6 +155,7 @@ def test_crawl_result_rejects_unknown_stop_reason(stop_reason: str) -> None:
             recipe_name="example-products",
             items_written=0,
             output_path="out.jsonl",
+            pages_scheduled=0,
             pages_attempted=0,
             requests_attempted=0,
             stop_reason=stop_reason,
