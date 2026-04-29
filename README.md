@@ -159,7 +159,7 @@ uv run --extra http ai-crawler test-recipe repaired.recipe.yaml --output crawl.j
 
 ## MCP usage
 
-Generate client config snippets for local uv-project usage:
+Generate client config snippets for local uv-project usage. For copy-paste examples across CLI/MCP/SDK flows, also see `docs/harness-examples.md`.
 
 ```bash
 uv run ai-crawler mcp-config --client hermes --project /path/to/ai-crawler
@@ -217,7 +217,7 @@ mcp_servers:
 
 ## Python SDK
 
-The Python SDK remains the stable embedded/programmatic surface. The npm package is only a launcher wrapper around this Python core.
+The Python SDK remains the stable embedded/programmatic surface. The npm package is only a launcher wrapper around this Python core. See `docs/harness-examples.md` for copy-paste SDK, MCP, and published-wrapper examples.
 
 npm publishing is automated with `.github/workflows/npm-publish.yml`.
 
