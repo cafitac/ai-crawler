@@ -1,5 +1,7 @@
 """MCP client configuration tests."""
 
+import pytest
+
 from ai_crawler.mcp.config import build_client_config
 
 
@@ -32,3 +34,18 @@ def test_build_codex_mcp_config_is_toml_snippet() -> None:
     assert 'command = "uv"' in config
     assert '"--project"' in config
     assert '"mcp"' in config
+
+
+def test_build_hermes_mcp_config_supports_npm_launcher() -> None:
+    config = build_client_config(client="hermes", launcher="npm")
+
+    assert 'command: "npx"' in config
+    assert '"-y"' in config
+    assert '"@cafitac/ai-crawler"' in config
+    assert '"mcp"' in config
+    assert '"--project"' not in config
+
+
+def test_build_client_config_rejects_unknown_launcher() -> None:
+    with pytest.raises(ValueError, match="Unsupported MCP launcher"):
+        build_client_config(client="hermes", launcher="pipx")

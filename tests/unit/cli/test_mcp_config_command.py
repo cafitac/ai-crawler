@@ -37,3 +37,15 @@ def test_mcp_config_command_prints_codex_config(capsys) -> None:
     output = capsys.readouterr().out
     assert '[mcp_servers."ai-crawler"]' in output
     assert 'command = "uv"' in output
+
+
+def test_mcp_config_command_prints_npm_launcher_config(capsys) -> None:
+    exit_code = cli_main.main(["mcp-config", "--client", "hermes", "--launcher", "npm"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert 'command: "npx"' in output
+    assert '"-y"' in output
+    assert '"@cafitac/ai-crawler"' in output
+    assert '"mcp"' in output
+    assert '"--project"' not in output
