@@ -52,6 +52,7 @@ class AICrawler:
     ) -> SDKResult:
         """Compile evidence into initial/repaired recipes and final crawl output."""
         evidence = self._evidence_loader.load_file(evidence_path)
+        normalized_evidence = _resolve_path(evidence_path)
         normalized_recipe = _resolve_path(recipe_path)
         normalized_repaired = _resolve_path(repaired_recipe_path)
         normalized_initial_output = _resolve_path(initial_output_path)
@@ -67,9 +68,13 @@ class AICrawler:
         _write_recipe_yaml(recipe=result.repaired_recipe, output_path=normalized_repaired)
         report = auto_report_payload(
             result=result,
+            command_type="auto",
             recipe_path=normalized_recipe,
             repaired_recipe_path=normalized_repaired,
             output_path=normalized_final_output,
+            evidence_path=normalized_evidence,
+            failure_phase=_auto_failure_phase(result),
+            phase_diagnostics=_auto_phase_diagnostics(result),
         )
         _write_json(report=report, output_path=normalized_report)
         return SDKResult(
@@ -186,9 +191,12 @@ class AICrawler:
         _write_recipe_yaml(recipe=result.repaired_recipe, output_path=normalized_repaired)
         report = auto_report_payload(
             result=result,
+            command_type="auto",
             recipe_path=normalized_recipe,
             repaired_recipe_path=normalized_repaired,
             output_path=normalized_final_output,
+            failure_phase=_auto_failure_phase(result),
+            phase_diagnostics=_auto_phase_diagnostics(result),
         )
         _write_json(report=report, output_path=normalized_report)
         return SDKResult(
@@ -208,13 +216,20 @@ def auto_exit_code(result: AutoCompileResult) -> int:
 
 def auto_report_payload(
     result: AutoCompileResult,
+    command_type: str,
     recipe_path: str,
     repaired_recipe_path: str,
     output_path: str,
+    evidence_path: str | None = None,
+    failure_phase: str = "",
+    phase_diagnostics: list[dict[str, object]] | None = None,
 ) -> dict[str, Any]:
     """Build the stable harness report payload."""
-    return {
+    report = {
         "ok": result.ok,
+        "command_type": command_type,
+        "failure_phase": failure_phase,
+        "phase_diagnostics": phase_diagnostics or _auto_phase_diagnostics(result),
         "summary": result.summary,
         "recipe_path": recipe_path,
         "repaired_recipe_path": repaired_recipe_path,
@@ -226,6 +241,53 @@ def auto_report_payload(
         "initial_failure_classification": result.initial_failure_classification,
         "final_failure_classification": result.final_failure_classification,
     }
+    if evidence_path is not None:
+        report["evidence_path"] = evidence_path
+    return report
+
+
+def _auto_failure_phase(result: AutoCompileResult) -> str:
+    if result.ok:
+        return ""
+    return "final_test"
+
+
+def _auto_phase_diagnostics(result: AutoCompileResult) -> list[dict[str, object]]:
+    return [
+        {
+            "name": "generate",
+            "status": "success",
+            "summary": f"generated initial recipe: {result.recipe.name}",
+        },
+        {
+            "name": "initial_test",
+            "status": "success",
+            "summary": _test_phase_summary(result.initial_test_report),
+        },
+        {
+            "name": "repair",
+            "status": "success",
+            "summary": f"selected final recipe: {result.repaired_recipe.name}",
+        },
+        {
+            "name": "final_test",
+            "status": "success" if result.ok else "failed",
+            "summary": _test_phase_summary(result.final_test_report),
+        },
+    ]
+
+
+def _test_phase_summary(test_report: dict[str, object]) -> str:
+    classification = test_report.get("failure_classification", {})
+    category = "unknown"
+    if isinstance(classification, dict):
+        raw_category = classification.get("category", "unknown")
+        if isinstance(raw_category, str) and raw_category:
+            category = raw_category
+    failure_reason = test_report.get("failure_reason", "")
+    if isinstance(failure_reason, str) and failure_reason:
+        return f"classification={category} reason={failure_reason}"
+    return f"classification={category}"
 
 
 def tool_report_payload(result: ToolResult) -> dict[str, Any]:
