@@ -18,7 +18,9 @@
   },
   "scripts": {
     "test": "node --test",
-    "pack:check": "npm pack --dry-run"
+    "pack:check": "npm pack --dry-run",
+    "prepack": "node scripts/write-wrapper-metadata.cjs",
+    "postpack": "node scripts/cleanup-wrapper-metadata.cjs"
   },
   "keywords": [
     "crawler",
