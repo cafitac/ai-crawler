@@ -231,18 +231,27 @@ class RecipeRunner:
     ) -> RunState:
         semaphore = asyncio.Semaphore(recipe.execution.concurrency)
         pending_results: dict[int, tuple[FetchResponse | None, int, RunnerStopReason]] = {}
-        pending_tasks = {
-            asyncio.create_task(
-                self._fetch_one_concurrent_request(
-                    recipe=recipe,
-                    request_index=request_index,
-                    request=request,
-                    semaphore=semaphore,
-                    started_at=started_at,
+        pending_tasks: set[
+            asyncio.Task[tuple[int, tuple[FetchResponse | None, int, RunnerStopReason]]]
+        ] = set()
+        next_schedule_offset = 0
+        while (
+            len(pending_tasks) < recipe.execution.concurrency
+            and next_schedule_offset < len(requests_to_fetch)
+        ):
+            request_index, request = requests_to_fetch[next_schedule_offset]
+            pending_tasks.add(
+                asyncio.create_task(
+                    self._fetch_one_concurrent_request(
+                        recipe=recipe,
+                        request_index=request_index,
+                        request=request,
+                        semaphore=semaphore,
+                        started_at=started_at,
+                    )
                 )
             )
-            for request_index, request in requests_to_fetch
-        }
+            next_schedule_offset += 1
         current_request_index = next_request_index
         next_flush_index = next_request_index
         pages_attempted = 0
@@ -287,7 +296,9 @@ class RecipeRunner:
                 pending_results[request_index] = result
             if terminal_state is not None:
                 continue
+            flushed_any = False
             while next_flush_index in pending_results:
+                flushed_any = True
                 current_request_index = next_flush_index
                 pages_attempted += 1
                 response, request_attempts, stop_reason = pending_results.pop(next_flush_index)
@@ -336,6 +347,25 @@ class RecipeRunner:
                     stop_reason="completed",
                 )
                 next_flush_index += 1
+            if terminal_state is not None or not flushed_any:
+                continue
+            while (
+                len(pending_tasks) < recipe.execution.concurrency
+                and next_schedule_offset < len(requests_to_fetch)
+            ):
+                request_index, request = requests_to_fetch[next_schedule_offset]
+                pending_tasks.add(
+                    asyncio.create_task(
+                        self._fetch_one_concurrent_request(
+                            recipe=recipe,
+                            request_index=request_index,
+                            request=request,
+                            semaphore=semaphore,
+                            started_at=started_at,
+                        )
+                    )
+                )
+                next_schedule_offset += 1
 
         if pending_tasks:
             for task in pending_tasks:
