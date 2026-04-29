@@ -561,16 +561,18 @@ def run_recipe_command(recipe_path: str, output_path: str) -> int:
         if result.checkpoint_path
         else ""
     )
-    print(
+    summary = (
         "ai-crawler run: "
         f"recipe={result.recipe_name} "
         f"items_written={result.items_written} "
+        f"pages_scheduled={result.pages_scheduled} "
         f"pages_attempted={result.pages_attempted} "
         f"requests_attempted={result.requests_attempted} "
         f"stop_reason={result.stop_reason} "
-        f"output={result.output_path}"
+        f"output={output_path}"
         f"{checkpoint_summary}"
     )
+    print(summary)
     return 0
 
 
@@ -596,16 +598,17 @@ def test_recipe_command(recipe_path: str, output_path: str, report_path: str) ->
     _write_tool_report(result=result, report_path=report_path)
     crawl_result = _artifact_dict(result, "crawl_result")
     test_report = _artifact_dict(result, "test_report")
-    print(
+    summary = (
         "ai-crawler test-recipe: "
         f"recipe={crawl_result.get('recipe_name', recipe.name)} "
         f"items_written={crawl_result.get('items_written', 0)} "
+        f"pages_scheduled={crawl_result.get('pages_scheduled', 0)} "
         f"failure_reason={test_report.get('failure_reason', '')} "
         f"output={output_path} "
         f"report={report_path}"
     )
+    print(summary)
     return 0
-
 
 def repair_recipe_command(recipe_path: str, report_path: str, output_path: str) -> int:
     """Repair one recipe using the single JSON report written by test-recipe."""

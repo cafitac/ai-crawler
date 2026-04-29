@@ -58,7 +58,10 @@ extract:
     assert exit_code == 0
     assert capsys.readouterr().out.strip() == (
         "ai-crawler test-recipe: "
-        f"recipe=products-api items_written=1 failure_reason= output={output_path} "
+        "recipe=products-api "
+        "items_written=1 "
+        "pages_scheduled=1 "
+        f"failure_reason= output={output_path} "
         f"report={report_path}"
     )
     assert output_path.read_text(encoding="utf-8") == (
@@ -69,6 +72,7 @@ extract:
         "recipe_name": "products-api",
         "items_written": 1,
         "output_path": str(output_path),
+        "pages_scheduled": 1,
         "pages_attempted": 1,
         "requests_attempted": 1,
         "stop_reason": "completed",
@@ -79,6 +83,7 @@ extract:
         "content_type": "application/json",
         "body_sample": '{"items": [{"name": "Keyboard", "price": 120}]}',
         "stop_reason": "completed",
+        "pages_scheduled": 1,
         "pages_attempted": 1,
         "requests_attempted": 1,
         "failure_reason": "",

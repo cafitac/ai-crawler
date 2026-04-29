@@ -35,6 +35,7 @@ class RunnerCheckpoint(DomainModel):
 @dataclass(slots=True)
 class RunState:
     items_written: int
+    pages_scheduled: int
     pages_attempted: int
     requests_attempted: int
     stop_reason: RunnerStopReason
@@ -120,6 +121,7 @@ class RecipeRunner:
             recipe_name=recipe.name,
             items_written=state.items_written,
             output_path=str(output_path),
+            pages_scheduled=state.pages_scheduled,
             pages_attempted=state.pages_attempted,
             requests_attempted=state.requests_attempted,
             stop_reason=state.stop_reason,
@@ -138,6 +140,7 @@ class RecipeRunner:
         started_at: float,
     ) -> RunState:
         current_request_index = next_request_index
+        pages_scheduled = 0
         pages_attempted = 0
         requests_attempted = 0
         stop_reason: RunnerStopReason = "completed"
@@ -154,6 +157,7 @@ class RecipeRunner:
                 stop_reason = "max_seconds_reached"
                 break
             current_request_index = request_index
+            pages_scheduled += 1
             pages_attempted += 1
             response, request_attempts, stop_reason = self._fetch_with_retries(
                 request=request,
@@ -185,6 +189,7 @@ class RecipeRunner:
             )
         return RunState(
             items_written=items_written,
+            pages_scheduled=pages_scheduled,
             pages_attempted=pages_attempted,
             requests_attempted=requests_attempted,
             stop_reason=stop_reason,
@@ -260,6 +265,7 @@ class RecipeRunner:
             next_schedule_offset += 1
         current_request_index = next_request_index
         next_flush_index = next_request_index
+        pages_scheduled = next_schedule_offset
         pages_attempted = 0
         requests_attempted = 0
         stop_reason: RunnerStopReason = "completed"
@@ -274,6 +280,7 @@ class RecipeRunner:
             if remaining_timeout == 0:
                 terminal_state = RunState(
                     items_written=items_written,
+                    pages_scheduled=pages_scheduled,
                     pages_attempted=pages_attempted,
                     requests_attempted=requests_attempted,
                     stop_reason="max_seconds_reached",
@@ -288,6 +295,7 @@ class RecipeRunner:
             if not done:
                 terminal_state = RunState(
                     items_written=items_written,
+                    pages_scheduled=pages_scheduled,
                     pages_attempted=pages_attempted,
                     requests_attempted=requests_attempted,
                     stop_reason="max_seconds_reached",
@@ -309,6 +317,7 @@ class RecipeRunner:
                 if response is None or stop_reason == "non_success_status":
                     terminal_state = RunState(
                         items_written=items_written,
+                        pages_scheduled=pages_scheduled,
                         pages_attempted=pages_attempted,
                         requests_attempted=requests_attempted,
                         stop_reason=stop_reason,
@@ -325,6 +334,7 @@ class RecipeRunner:
                 if stop_reason == "max_items_reached":
                     terminal_state = RunState(
                         items_written=items_written,
+                        pages_scheduled=pages_scheduled,
                         pages_attempted=pages_attempted,
                         requests_attempted=requests_attempted,
                         stop_reason=stop_reason,
@@ -335,6 +345,7 @@ class RecipeRunner:
                     stop_reason = "empty_page"
                     terminal_state = RunState(
                         items_written=items_written,
+                        pages_scheduled=pages_scheduled,
                         pages_attempted=pages_attempted,
                         requests_attempted=requests_attempted,
                         stop_reason=stop_reason,
@@ -374,6 +385,7 @@ class RecipeRunner:
                     )
                 )
                 next_schedule_offset += 1
+                pages_scheduled = next_schedule_offset
 
         if pending_tasks:
             for task in pending_tasks:
@@ -385,6 +397,7 @@ class RecipeRunner:
 
         return RunState(
             items_written=items_written,
+            pages_scheduled=pages_scheduled,
             pages_attempted=pages_attempted,
             requests_attempted=requests_attempted,
             stop_reason=stop_reason,
