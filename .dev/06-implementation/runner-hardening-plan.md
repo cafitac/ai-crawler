@@ -393,7 +393,7 @@ Objective: avoid mixing async throughput work with state-model churn.
 
 Files:
 - Modify: `.dev/06-implementation/runner-hardening-plan.md`
-- Possibly create: `.dev/06-implementation/runner-concurrency-spike.md`
+- Create: `.dev/06-implementation/runner-concurrency-spike.md`
 - Reference: `src/ai_crawler/core/models/recipe.py`
 
 Step 1: Do not implement `execution.concurrency > 1` in the same PR as retry/resume.
@@ -405,6 +405,14 @@ Step 2: After Tasks 1-8 land, run a short design spike answering:
 - do per-domain and global concurrency need separate config fields?
 
 Step 3: Save the spike note as a separate draft if concurrency still belongs in Milestone 4.
+
+Decision outcome:
+- Keep the current sequential runner as the correctness oracle.
+- Do not add threaded concurrency inside the existing `RecipeRunner` loop.
+- If concurrency work proceeds, use a dedicated async scheduler + single ordered writer design.
+- Preserve `next_request_index` as the first durable checkpoint cursor.
+- Split `per_domain_concurrency` / richer rate-limit config into a follow-up contract PR instead of overloading `delay_ms`.
+- See `.dev/06-implementation/runner-concurrency-spike.md` for the full design note.
 
 Verification:
 - concurrency decision is documented before code starts
