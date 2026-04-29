@@ -61,8 +61,8 @@ extract:
         "recipe=products-api "
         "items_written=1 "
         "pages_scheduled=1 "
-        f"failure_reason= output={output_path} "
-        f"report={report_path}"
+        "pages_completed=1 "
+        f"failure_reason= output={output_path} report={report_path}"
     )
     assert output_path.read_text(encoding="utf-8") == (
         '{"name": "Keyboard", "price": 120}\n'
@@ -73,6 +73,7 @@ extract:
         "items_written": 1,
         "output_path": str(output_path),
         "pages_scheduled": 1,
+        "pages_completed": 1,
         "pages_attempted": 1,
         "requests_attempted": 1,
         "stop_reason": "completed",
@@ -84,6 +85,7 @@ extract:
         "body_sample": '{"items": [{"name": "Keyboard", "price": 120}]}',
         "stop_reason": "completed",
         "pages_scheduled": 1,
+        "pages_completed": 1,
         "pages_attempted": 1,
         "requests_attempted": 1,
         "failure_reason": "",
