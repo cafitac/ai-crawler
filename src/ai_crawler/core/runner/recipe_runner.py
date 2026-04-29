@@ -202,48 +202,118 @@ class RecipeRunner:
         items_written: int,
         started_at: float,
     ) -> RunState:
-        current_request_index = next_request_index
         requests_to_fetch = tuple(
             enumerate(requests[next_request_index:], start=next_request_index)
         )
-        results = asyncio.run(
-            self._fetch_requests_concurrently(
+        return asyncio.run(
+            self._run_concurrent_async(
                 recipe=recipe,
                 requests_to_fetch=requests_to_fetch,
+                output_file=output_file,
+                output_path=output_path,
+                checkpoint_path=checkpoint_path,
+                next_request_index=next_request_index,
+                items_written=items_written,
                 started_at=started_at,
             )
         )
+
+    async def _run_concurrent_async(
+        self,
+        recipe: Recipe,
+        requests_to_fetch: tuple[tuple[int, RequestSpec], ...],
+        output_file: TextWriter,
+        output_path: Path,
+        checkpoint_path: Path | None,
+        next_request_index: int,
+        items_written: int,
+        started_at: float,
+    ) -> RunState:
+        semaphore = asyncio.Semaphore(recipe.execution.concurrency)
+        pending_results: dict[int, tuple[FetchResponse | None, int, RunnerStopReason]] = {}
+        pending_tasks = {
+            asyncio.create_task(
+                self._fetch_one_concurrent_request(
+                    recipe=recipe,
+                    request_index=request_index,
+                    request=request,
+                    semaphore=semaphore,
+                    started_at=started_at,
+                )
+            )
+            for request_index, request in requests_to_fetch
+        }
+        current_request_index = next_request_index
+        next_flush_index = next_request_index
         pages_attempted = 0
         requests_attempted = 0
         stop_reason: RunnerStopReason = "completed"
         max_items = recipe.execution.max_items
-        for request_index, _request in requests_to_fetch:
-            current_request_index = request_index
-            pages_attempted += 1
-            response, request_attempts, stop_reason = results[request_index]
-            requests_attempted += request_attempts
-            if response is None or stop_reason == "non_success_status":
-                break
-            extracted_items = _extract_response_items(response, recipe)
-            items_written, stop_reason = _write_items(
-                output_file=output_file,
-                items=extracted_items,
-                items_written=items_written,
-                max_items=max_items,
+        terminal_state: RunState | None = None
+
+        while pending_tasks:
+            done, pending_tasks = await asyncio.wait(
+                pending_tasks,
+                return_when=asyncio.FIRST_COMPLETED,
             )
-            if stop_reason == "max_items_reached":
-                break
-            if not extracted_items:
-                stop_reason = "empty_page"
-                break
-            _write_checkpoint(
-                checkpoint_path=checkpoint_path,
-                recipe=recipe,
-                output_path=output_path,
-                next_request_index=request_index + 1,
-                items_written=items_written,
-                stop_reason="completed",
-            )
+            for task in done:
+                request_index, result = task.result()
+                pending_results[request_index] = result
+            if terminal_state is not None:
+                continue
+            while next_flush_index in pending_results:
+                current_request_index = next_flush_index
+                pages_attempted += 1
+                response, request_attempts, stop_reason = pending_results.pop(next_flush_index)
+                requests_attempted += request_attempts
+                if response is None or stop_reason == "non_success_status":
+                    terminal_state = RunState(
+                        items_written=items_written,
+                        pages_attempted=pages_attempted,
+                        requests_attempted=requests_attempted,
+                        stop_reason=stop_reason,
+                        current_request_index=current_request_index,
+                    )
+                    break
+                extracted_items = _extract_response_items(response, recipe)
+                items_written, stop_reason = _write_items(
+                    output_file=output_file,
+                    items=extracted_items,
+                    items_written=items_written,
+                    max_items=max_items,
+                )
+                if stop_reason == "max_items_reached":
+                    terminal_state = RunState(
+                        items_written=items_written,
+                        pages_attempted=pages_attempted,
+                        requests_attempted=requests_attempted,
+                        stop_reason=stop_reason,
+                        current_request_index=current_request_index,
+                    )
+                    break
+                if not extracted_items:
+                    stop_reason = "empty_page"
+                    terminal_state = RunState(
+                        items_written=items_written,
+                        pages_attempted=pages_attempted,
+                        requests_attempted=requests_attempted,
+                        stop_reason=stop_reason,
+                        current_request_index=current_request_index,
+                    )
+                    break
+                _write_checkpoint(
+                    checkpoint_path=checkpoint_path,
+                    recipe=recipe,
+                    output_path=output_path,
+                    next_request_index=next_flush_index + 1,
+                    items_written=items_written,
+                    stop_reason="completed",
+                )
+                next_flush_index += 1
+
+        if terminal_state is not None:
+            return terminal_state
+
         return RunState(
             items_written=items_written,
             pages_attempted=pages_attempted,
@@ -252,29 +322,22 @@ class RecipeRunner:
             current_request_index=current_request_index,
         )
 
-    async def _fetch_requests_concurrently(
+    async def _fetch_one_concurrent_request(
         self,
         recipe: Recipe,
-        requests_to_fetch: tuple[tuple[int, RequestSpec], ...],
+        request_index: int,
+        request: RequestSpec,
+        semaphore: asyncio.Semaphore,
         started_at: float,
-    ) -> dict[int, tuple[FetchResponse | None, int, RunnerStopReason]]:
-        semaphore = asyncio.Semaphore(recipe.execution.concurrency)
-        results: dict[int, tuple[FetchResponse | None, int, RunnerStopReason]] = {}
-
-        async def worker(request_index: int, request: RequestSpec) -> None:
-            async with semaphore:
-                result = await asyncio.to_thread(
-                    self._fetch_with_retries,
-                    request=request,
-                    recipe=recipe,
-                    started_at=started_at,
-                )
-                results[request_index] = result
-
-        await asyncio.gather(
-            *(worker(request_index, request) for request_index, request in requests_to_fetch)
-        )
-        return results
+    ) -> tuple[int, tuple[FetchResponse | None, int, RunnerStopReason]]:
+        async with semaphore:
+            result = await asyncio.to_thread(
+                self._fetch_with_retries,
+                request=request,
+                recipe=recipe,
+                started_at=started_at,
+            )
+        return request_index, result
 
     def _fetch_with_retries(
         self,

@@ -106,6 +106,32 @@ class OutOfOrderFetcher:
         )
 
 
+class CheckpointStreamingFetcher:
+    def __init__(self) -> None:
+        self.page_one_done = threading.Event()
+        self.release_page_two = threading.Event()
+
+    def fetch(self, request: RequestSpec) -> FetchResponse:
+        page = request.query["page"]
+        items_by_page = {
+            "1": [{"id": "p1", "name": "Keyboard", "price": 120}],
+            "2": [{"id": "p2", "name": "Mouse", "price": 40}],
+            "3": [],
+        }
+        if page == "1":
+            self.page_one_done.set()
+        elif page == "2":
+            released = self.release_page_two.wait(timeout=2)
+            assert released, "page 2 should be released by the test"
+        return FetchResponse(
+            url=request.url,
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_text=json.dumps({"items": items_by_page[page]}),
+            elapsed_ms=5,
+        )
+
+
 def test_recipe_runner_executes_query_page_pagination_to_jsonl(tmp_path: Path) -> None:
     recipe = Recipe.model_validate(
         {
@@ -242,6 +268,73 @@ def test_recipe_runner_rejects_delay_rate_control_with_concurrency(tmp_path: Pat
         match="execution.delay_ms with concurrency > 1 is not supported yet",
     ):
         runner.run(recipe)
+
+
+
+def test_recipe_runner_advances_checkpoint_during_concurrent_flush(tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "concurrent-products.checkpoint.json"
+    output_path = tmp_path / "concurrent-products.jsonl"
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [
+                {
+                    "id": "list-products",
+                    "method": "GET",
+                    "url": "https://example.test/api/products",
+                    "query": {"page": "1"},
+                }
+            ],
+            "pagination": {
+                "strategy": "query_page",
+                "query_param": "page",
+                "start": 1,
+                "max_pages": 3,
+            },
+            "execution": {
+                "concurrency": 3,
+                "checkpoint_path": str(checkpoint_path),
+            },
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    fetcher = CheckpointStreamingFetcher()
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+    result_holder: dict[str, object] = {}
+    error_holder: list[BaseException] = []
+
+    def run_recipe() -> None:
+        try:
+            result_holder["result"] = runner.run(recipe)
+        except BaseException as exc:  # pragma: no cover - propagated below
+            error_holder.append(exc)
+
+    thread = threading.Thread(target=run_recipe)
+    thread.start()
+    assert fetcher.page_one_done.wait(timeout=1), "page 1 should complete before page 2 releases"
+
+    checkpoint_payload = None
+    for _ in range(20):
+        if checkpoint_path.exists():
+            checkpoint_payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            break
+        threading.Event().wait(0.01)
+
+    fetcher.release_page_two.set()
+    thread.join(timeout=2)
+
+    assert not error_holder
+    assert checkpoint_payload == {
+        "recipe_name": "products-api",
+        "next_request_index": 1,
+        "items_written": 1,
+        "output_path": str(output_path),
+        "stop_reason": "completed",
+    }
 
 
 
