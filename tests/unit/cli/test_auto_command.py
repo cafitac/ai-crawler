@@ -105,6 +105,14 @@ def test_auto_command_uses_defaults_and_writes_final_harness_artifacts(
         "requests_attempted": 1,
         "stop_reason": "completed",
     }
+    assert report["failure_context"] == {
+        "category": "success",
+        "retryable": False,
+        "requires_human": False,
+        "summary": "test request completed successfully",
+        "failure_reason": "",
+        "stop_reason": "completed",
+    }
     assert report["final_crawl_result"]["items_written"] == 1
     assert report["initial_failure_classification"]["category"] == "extraction_failed"
     assert report["final_failure_classification"]["category"] == "success"

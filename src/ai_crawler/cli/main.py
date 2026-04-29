@@ -789,6 +789,12 @@ def _auto_report_payload(
         "initial_test_report": result.initial_test_report,
         "final_test_report": result.final_test_report,
         "progress": _progress_payload(result.final_crawl_result),
+        "failure_context": _failure_context_payload(
+            classification=result.final_failure_classification,
+            summary=_string_value(result.final_failure_classification.get("summary")),
+            failure_reason=_string_value(result.final_test_report.get("failure_reason")),
+            stop_reason=result.final_crawl_result.stop_reason,
+        ),
         "initial_failure_classification": result.initial_failure_classification,
         "final_failure_classification": result.final_failure_classification,
     }
@@ -817,6 +823,12 @@ def _write_compile_failure_report(
         "goal": goal,
         "failure_phase": failure_phase,
         "failure_classification": failure_classification,
+        "failure_context": _failure_context_payload(
+            classification=failure_classification,
+            summary=summary,
+            failure_reason="",
+            stop_reason="",
+        ),
         "phase_diagnostics": phase_diagnostics,
         "summary": summary,
         "evidence_path": evidence_path,
@@ -888,6 +900,34 @@ def _progress_payload(crawl_result: CrawlResult) -> dict[str, object]:
         "requests_attempted": crawl_result.requests_attempted,
         "stop_reason": crawl_result.stop_reason,
     }
+
+
+def _failure_context_payload(
+    classification: dict[str, object],
+    summary: str,
+    failure_reason: str,
+    stop_reason: str,
+) -> dict[str, object]:
+    return {
+        "category": _string_value(classification.get("category")) or "unknown",
+        "retryable": _bool_value(classification.get("retryable")),
+        "requires_human": _bool_value(classification.get("requires_human")),
+        "summary": summary,
+        "failure_reason": failure_reason,
+        "stop_reason": stop_reason,
+    }
+
+
+def _bool_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return False
+
+
+def _string_value(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    return ""
 
 
 def _probe_phase_diagnostic(evidence: EvidenceBundle) -> dict[str, object]:

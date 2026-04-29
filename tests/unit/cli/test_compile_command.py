@@ -245,11 +245,19 @@ def test_compile_command_json_mode_reports_no_endpoint_candidates(
         "retryable": True,
         "requires_human": False,
     }
-    assert stdout_report["evidence_path"] == str(evidence_path)
     expected_summary = (
         "no useful network endpoint candidates were captured; inspect evidence or retry "
         "probe with an authorized target"
     )
+    assert stdout_report["failure_context"] == {
+        "category": "no_endpoint_candidates",
+        "retryable": True,
+        "requires_human": False,
+        "summary": expected_summary,
+        "failure_reason": "",
+        "stop_reason": "",
+    }
+    assert stdout_report["evidence_path"] == str(evidence_path)
     assert stdout_report["phase_diagnostics"] == [
         {
             "name": "probe",
@@ -309,6 +317,14 @@ def test_compile_command_json_mode_reports_final_test_failure_phase(
         "requests_attempted": 1,
         "stop_reason": "empty_page",
     }
+    assert stdout_report["failure_context"] == {
+        "category": "extraction_failed",
+        "retryable": False,
+        "requires_human": False,
+        "summary": "response succeeded but recipe extracted no items",
+        "failure_reason": "no_items_extracted",
+        "stop_reason": "empty_page",
+    }
     assert stdout_report["phase_diagnostics"][-1]["name"] == "final_test"
     assert stdout_report["phase_diagnostics"][-1]["status"] == "failed"
     assert stdout_report["final_failure_classification"]["category"] == "extraction_failed"
@@ -353,6 +369,14 @@ def test_compile_command_json_mode_redacts_probe_failure_summary(
     assert exit_code == 2
     assert stdout_report["failure_phase"] == "probe"
     assert stdout_report["failure_classification"]["category"] == "probe_failed"
+    assert stdout_report["failure_context"] == {
+        "category": "probe_failed",
+        "retryable": True,
+        "requires_human": False,
+        "summary": "browser probe failed: navigation failed token=[REDACTED]",
+        "failure_reason": "",
+        "stop_reason": "",
+    }
     assert "abcdef123456" not in captured.err
     assert "abcdef123456" not in captured.out
     assert "abcdef123456" not in report_text
