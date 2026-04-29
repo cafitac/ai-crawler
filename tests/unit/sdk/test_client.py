@@ -84,6 +84,14 @@ def test_sdk_compile_url_probes_target_and_returns_harness_report(tmp_path) -> N
         "requests_attempted": 1,
         "stop_reason": "completed",
     }
+    assert result.report["failure_context"] == {
+        "category": "success",
+        "retryable": False,
+        "requires_human": False,
+        "summary": "test request completed successfully",
+        "failure_reason": "",
+        "stop_reason": "completed",
+    }
     assert result.report["final_crawl_result"]["items_written"] == 1
     assert json.loads(report_path.read_text(encoding="utf-8")) == result.report
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
@@ -149,6 +157,14 @@ def test_sdk_auto_compiles_from_evidence_file_and_returns_report(tmp_path) -> No
         "pages_failed": 0,
         "pages_attempted": 1,
         "requests_attempted": 1,
+        "stop_reason": "completed",
+    }
+    assert result.report["failure_context"] == {
+        "category": "success",
+        "retryable": False,
+        "requires_human": False,
+        "summary": "test request completed successfully",
+        "failure_reason": "",
         "stop_reason": "completed",
     }
     assert result.report["final_crawl_result"]["items_written"] == 1

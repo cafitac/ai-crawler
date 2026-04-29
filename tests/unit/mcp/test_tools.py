@@ -77,6 +77,14 @@ def test_mcp_compile_url_tool_returns_harness_report(tmp_path) -> None:
         "requests_attempted": 1,
         "stop_reason": "completed",
     }
+    assert report["failure_context"] == {
+        "category": "success",
+        "retryable": False,
+        "requires_human": False,
+        "summary": "test request completed successfully",
+        "failure_reason": "",
+        "stop_reason": "completed",
+    }
     assert report["final_crawl_result"]["items_written"] == 1
 
 
@@ -129,6 +137,14 @@ def test_mcp_auto_compile_tool_returns_harness_report(tmp_path) -> None:
         "pages_failed": 0,
         "pages_attempted": 1,
         "requests_attempted": 1,
+        "stop_reason": "completed",
+    }
+    assert report["failure_context"] == {
+        "category": "success",
+        "retryable": False,
+        "requires_human": False,
+        "summary": "test request completed successfully",
+        "failure_reason": "",
         "stop_reason": "completed",
     }
     assert report["final_crawl_result"]["items_written"] == 1
