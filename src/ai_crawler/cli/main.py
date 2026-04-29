@@ -21,6 +21,7 @@ from ai_crawler.core.agent import (
 )
 from ai_crawler.core.evidence import EvidenceLoader
 from ai_crawler.core.models import AgentAction, EvidenceBundle, Recipe, ToolResult
+from ai_crawler.core.models.crawl import CrawlResult
 from ai_crawler.core.recipes import RecipeLoader
 from ai_crawler.core.runner import RecipeFetcher, RecipeRunner, RunnerConfig
 from ai_crawler.core.security import redact_text
@@ -787,6 +788,7 @@ def _auto_report_payload(
         "final_crawl_result": result.final_crawl_result.model_dump(mode="json"),
         "initial_test_report": result.initial_test_report,
         "final_test_report": result.final_test_report,
+        "progress": _progress_payload(result.final_crawl_result),
         "initial_failure_classification": result.initial_failure_classification,
         "final_failure_classification": result.final_failure_classification,
     }
@@ -874,6 +876,18 @@ def _auto_failure_phase(result: AutoCompileResult) -> str:
     if result.ok:
         return ""
     return "final_test"
+
+
+def _progress_payload(crawl_result: CrawlResult) -> dict[str, object]:
+    return {
+        "items_written": crawl_result.items_written,
+        "pages_scheduled": crawl_result.pages_scheduled,
+        "pages_completed": crawl_result.pages_completed,
+        "pages_failed": crawl_result.pages_failed,
+        "pages_attempted": crawl_result.pages_attempted,
+        "requests_attempted": crawl_result.requests_attempted,
+        "stop_reason": crawl_result.stop_reason,
+    }
 
 
 def _probe_phase_diagnostic(evidence: EvidenceBundle) -> dict[str, object]:

@@ -75,6 +75,15 @@ def test_sdk_compile_url_probes_target_and_returns_harness_report(tmp_path) -> N
     ]
     assert all(phase["status"] == "success" for phase in result.report["phase_diagnostics"])
     assert result.report["evidence_path"] == str(evidence_path.resolve())
+    assert result.report["progress"] == {
+        "items_written": 1,
+        "pages_scheduled": 1,
+        "pages_completed": 1,
+        "pages_failed": 0,
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "completed",
+    }
     assert result.report["final_crawl_result"]["items_written"] == 1
     assert json.loads(report_path.read_text(encoding="utf-8")) == result.report
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
@@ -133,6 +142,15 @@ def test_sdk_auto_compiles_from_evidence_file_and_returns_report(tmp_path) -> No
     assert result.report["evidence_path"] == str(evidence_path.resolve())
     assert result.report["recipe_path"] == str(recipe_path.resolve())
     assert result.report["repaired_recipe_path"] == str(repaired_path.resolve())
+    assert result.report["progress"] == {
+        "items_written": 1,
+        "pages_scheduled": 1,
+        "pages_completed": 1,
+        "pages_failed": 0,
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "completed",
+    }
     assert result.report["final_crawl_result"]["items_written"] == 1
     assert json.loads(report_path.read_text(encoding="utf-8")) == result.report
     assert output_path.read_text(encoding="utf-8") == '{"name": "Keyboard", "price": 120}\n'

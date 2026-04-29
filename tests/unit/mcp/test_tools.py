@@ -68,6 +68,15 @@ def test_mcp_compile_url_tool_returns_harness_report(tmp_path) -> None:
     ]
     assert all(phase["status"] == "success" for phase in report["phase_diagnostics"])
     assert report["evidence_path"] == str((tmp_path / "evidence.json").resolve())
+    assert report["progress"] == {
+        "items_written": 1,
+        "pages_scheduled": 1,
+        "pages_completed": 1,
+        "pages_failed": 0,
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "completed",
+    }
     assert report["final_crawl_result"]["items_written"] == 1
 
 
@@ -113,5 +122,14 @@ def test_mcp_auto_compile_tool_returns_harness_report(tmp_path) -> None:
     ]
     assert all(phase["status"] == "success" for phase in report["phase_diagnostics"])
     assert report["evidence_path"] == str(evidence_path.resolve())
+    assert report["progress"] == {
+        "items_written": 1,
+        "pages_scheduled": 1,
+        "pages_completed": 1,
+        "pages_failed": 0,
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "completed",
+    }
     assert report["final_crawl_result"]["items_written"] == 1
     assert report["final_failure_classification"]["category"] == "success"

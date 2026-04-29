@@ -96,6 +96,15 @@ def test_auto_command_uses_defaults_and_writes_final_harness_artifacts(
     assert report["ok"] is True
     assert report["recipe_path"] == str(recipe_path)
     assert report["repaired_recipe_path"] == str(repaired_path)
+    assert report["progress"] == {
+        "items_written": 1,
+        "pages_scheduled": 1,
+        "pages_completed": 1,
+        "pages_failed": 0,
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "completed",
+    }
     assert report["final_crawl_result"]["items_written"] == 1
     assert report["initial_failure_classification"]["category"] == "extraction_failed"
     assert report["final_failure_classification"]["category"] == "success"
@@ -155,6 +164,15 @@ def test_auto_command_json_mode_prints_machine_readable_report(
     assert stdout_report["recipe_path"] == str(recipe_path)
     assert stdout_report["repaired_recipe_path"] == str(repaired_path)
     assert stdout_report["output_path"] == str(output_path)
+    assert stdout_report["progress"] == {
+        "items_written": 1,
+        "pages_scheduled": 1,
+        "pages_completed": 1,
+        "pages_failed": 0,
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "completed",
+    }
     assert stdout_report["final_crawl_result"]["items_written"] == 1
     assert json.loads(report_path.read_text(encoding="utf-8")) == stdout_report
 
@@ -206,6 +224,15 @@ def test_auto_command_json_mode_returns_failure_exit_code_with_report(
     assert exit_code == 2
     stdout_report = json.loads(capsys.readouterr().out)
     assert stdout_report["ok"] is False
+    assert stdout_report["progress"] == {
+        "items_written": 0,
+        "pages_scheduled": 1,
+        "pages_completed": 1,
+        "pages_failed": 0,
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "empty_page",
+    }
     assert stdout_report["final_failure_classification"]["category"] == "extraction_failed"
     assert json.loads(report_path.read_text(encoding="utf-8")) == stdout_report
 

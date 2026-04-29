@@ -140,6 +140,15 @@ def test_compile_command_probes_then_auto_compiles_with_defaults(
     ]
     assert all(phase["status"] == "success" for phase in report["phase_diagnostics"])
     assert report["evidence_path"] == str(evidence_path)
+    assert report["progress"] == {
+        "items_written": 1,
+        "pages_scheduled": 1,
+        "pages_completed": 1,
+        "pages_failed": 0,
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "completed",
+    }
     assert report["final_crawl_result"]["items_written"] == 1
 
 
@@ -180,6 +189,15 @@ def test_compile_command_json_mode_prints_only_machine_readable_report(
     assert stdout_report["command_type"] == "compile"
     assert stdout_report["failure_phase"] == ""
     assert stdout_report["evidence_path"] == str(evidence_path)
+    assert stdout_report["progress"] == {
+        "items_written": 1,
+        "pages_scheduled": 1,
+        "pages_completed": 1,
+        "pages_failed": 0,
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "completed",
+    }
     assert stdout_report["final_crawl_result"]["items_written"] == 1
     assert json.loads(report_path.read_text(encoding="utf-8")) == stdout_report
 
@@ -282,6 +300,15 @@ def test_compile_command_json_mode_reports_final_test_failure_phase(
     assert exit_code == 2
     assert stdout_report["ok"] is False
     assert stdout_report["failure_phase"] == "final_test"
+    assert stdout_report["progress"] == {
+        "items_written": 0,
+        "pages_scheduled": 1,
+        "pages_completed": 1,
+        "pages_failed": 0,
+        "pages_attempted": 1,
+        "requests_attempted": 1,
+        "stop_reason": "empty_page",
+    }
     assert stdout_report["phase_diagnostics"][-1]["name"] == "final_test"
     assert stdout_report["phase_diagnostics"][-1]["status"] == "failed"
     assert stdout_report["final_failure_classification"]["category"] == "extraction_failed"
