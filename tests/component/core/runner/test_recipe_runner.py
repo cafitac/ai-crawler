@@ -157,6 +157,31 @@ class ConcurrentTimeoutFetcher:
         )
 
 
+class ConcurrentDelayFetcher:
+    def __init__(self) -> None:
+        self.page_two_done = threading.Event()
+
+    def fetch(self, request: RequestSpec) -> FetchResponse:
+        page = request.query["page"]
+        items_by_page = {
+            "1": [{"id": "p1", "name": "Keyboard", "price": 120}],
+            "2": [{"id": "p2", "name": "Mouse", "price": 40}],
+            "3": [],
+        }
+        if page == "1":
+            released = self.page_two_done.wait(timeout=1)
+            assert released, "page 1 should be released after page 2 completes"
+        elif page == "2":
+            self.page_two_done.set()
+        return FetchResponse(
+            url=request.url,
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_text=json.dumps({"items": items_by_page[page]}),
+            elapsed_ms=5,
+        )
+
+
 class ConcurrentMaxItemsFetcher:
     def __init__(self) -> None:
         self.urls: list[str] = []
@@ -291,7 +316,7 @@ def test_recipe_runner_preserves_request_order_under_concurrency(tmp_path: Path)
 
 
 
-def test_recipe_runner_rejects_delay_rate_control_with_concurrency(tmp_path: Path) -> None:
+def test_recipe_runner_applies_delay_rate_control_under_concurrency(tmp_path: Path) -> None:
     recipe = Recipe.model_validate(
         {
             "name": "products-api",
@@ -318,13 +343,26 @@ def test_recipe_runner_rejects_delay_rate_control_with_concurrency(tmp_path: Pat
         }
     )
     output_path = tmp_path / "products.jsonl"
-    runner = RecipeRunner(fetcher=FakeFetcher(), config=RunnerConfig(output_path=str(output_path)))
+    fetcher = ConcurrentDelayFetcher()
+    sleep_calls: list[float] = []
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+    runner._sleep = sleep_calls.append
 
-    with pytest.raises(
-        ValueError,
-        match="execution.delay_ms with concurrency > 1 is not supported yet",
-    ):
-        runner.run(recipe)
+    result = runner.run(recipe)
+
+    assert result.items_written == 2
+    assert result.pages_attempted == 3
+    assert result.requests_attempted == 3
+    assert result.stop_reason == "empty_page"
+    assert sleep_calls == [0.15, 0.15]
+    written_items = [
+        json.loads(line)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert written_items == [
+        {"name": "Keyboard", "price": 120},
+        {"name": "Mouse", "price": 40},
+    ]
 
 
 

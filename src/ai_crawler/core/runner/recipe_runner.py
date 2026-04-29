@@ -235,10 +235,16 @@ class RecipeRunner:
             asyncio.Task[tuple[int, tuple[FetchResponse | None, int, RunnerStopReason]]]
         ] = set()
         next_schedule_offset = 0
+        max_items = recipe.execution.max_items
+        max_seconds = recipe.execution.max_seconds
+        delay_ms = recipe.execution.delay_ms
+        terminal_state: RunState | None = None
+
         while (
             len(pending_tasks) < recipe.execution.concurrency
             and next_schedule_offset < len(requests_to_fetch)
         ):
+            await _sleep_before_concurrent_launch(self._sleep, delay_ms, next_schedule_offset)
             request_index, request = requests_to_fetch[next_schedule_offset]
             pending_tasks.add(
                 asyncio.create_task(
@@ -257,9 +263,6 @@ class RecipeRunner:
         pages_attempted = 0
         requests_attempted = 0
         stop_reason: RunnerStopReason = "completed"
-        max_items = recipe.execution.max_items
-        max_seconds = recipe.execution.max_seconds
-        terminal_state: RunState | None = None
 
         while pending_tasks:
             remaining_timeout = _remaining_timeout_seconds(
@@ -353,6 +356,11 @@ class RecipeRunner:
                 len(pending_tasks) < recipe.execution.concurrency
                 and next_schedule_offset < len(requests_to_fetch)
             ):
+                await _sleep_before_concurrent_launch(
+                    self._sleep,
+                    delay_ms,
+                    next_schedule_offset,
+                )
                 request_index, request = requests_to_fetch[next_schedule_offset]
                 pending_tasks.add(
                     asyncio.create_task(
@@ -437,12 +445,7 @@ class RecipeRunner:
 
 
 def _validate_execution_mode(recipe: Recipe) -> None:
-    if recipe.execution.concurrency <= 1:
-        return
-    if recipe.execution.delay_ms > 0:
-        msg = "execution.delay_ms with concurrency > 1 is not supported yet"
-        raise ValueError(msg)
-
+    del recipe
 
 
 def _expand_requests(recipe: Recipe) -> tuple[RequestSpec, ...]:
@@ -614,6 +617,16 @@ def _sleep_between_requests(
     if delay_ms <= 0 or pages_attempted <= 0:
         return
     sleep_fn(delay_ms / 1000)
+
+
+async def _sleep_before_concurrent_launch(
+    sleep_fn: Callable[[float], object],
+    delay_ms: int,
+    scheduled_requests: int,
+) -> None:
+    if delay_ms <= 0 or scheduled_requests <= 0:
+        return
+    await asyncio.to_thread(sleep_fn, delay_ms / 1000)
 
 
 def _sleep_before_retry(
