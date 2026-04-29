@@ -76,8 +76,9 @@ Then verify the real published artifact from outside the repo:
 ```bash
 tmpdir=$(mktemp -d)
 cd "$tmpdir"
-npm exec --yes @cafitac/ai-crawler@0.1.1 -- --version
-npm exec --yes @cafitac/ai-crawler@0.1.1 -- doctor
+npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- --version
+npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- doctor
+npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- mcp-config --client hermes --launcher npm
 npm install @cafitac/ai-crawler@0.1.1
 ./node_modules/.bin/ai-crawler --version
 ./node_modules/.bin/ai-crawler doctor
@@ -86,7 +87,7 @@ npm install @cafitac/ai-crawler@0.1.1
 For MCP onboarding smoke, also verify the published wrapper can emit npm-first client config:
 
 ```bash
-npm exec --yes @cafitac/ai-crawler@0.1.1 -- mcp-config --client hermes --launcher npm
+npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- mcp-config --client hermes --launcher npm
 ```
 
 ## Failure triage
