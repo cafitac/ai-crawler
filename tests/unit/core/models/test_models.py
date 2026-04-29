@@ -130,6 +130,7 @@ def test_recipe_crawl_result_and_failure_report_are_explicit_models() -> None:
         output_path="out.jsonl",
         pages_scheduled=2,
         pages_completed=2,
+        pages_failed=0,
         pages_attempted=2,
         requests_attempted=2,
         stop_reason="completed",
@@ -143,6 +144,7 @@ def test_recipe_crawl_result_and_failure_report_are_explicit_models() -> None:
     assert crawl_result.items_written == 2
     assert crawl_result.pages_scheduled == 2
     assert crawl_result.pages_completed == 2
+    assert crawl_result.pages_failed == 0
     assert crawl_result.pages_attempted == 2
     assert crawl_result.requests_attempted == 2
     assert crawl_result.stop_reason == "completed"
@@ -159,6 +161,7 @@ def test_crawl_result_rejects_unknown_stop_reason(stop_reason: str) -> None:
             output_path="out.jsonl",
             pages_scheduled=0,
             pages_completed=0,
+            pages_failed=0,
             pages_attempted=0,
             requests_attempted=0,
             stop_reason=stop_reason,
