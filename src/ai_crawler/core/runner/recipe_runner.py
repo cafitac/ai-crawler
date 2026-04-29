@@ -20,6 +20,16 @@ class RunnerConfig(DomainModel):
     output_path: str = Field(min_length=1)
 
 
+class RunnerCheckpoint(DomainModel):
+    """Persisted runner resume state."""
+
+    recipe_name: str = Field(min_length=1)
+    next_request_index: int = Field(ge=0)
+    items_written: int = Field(ge=0)
+    output_path: str = Field(min_length=1)
+    stop_reason: RunnerStopReason
+
+
 class RecipeFetcher(Protocol):
     """Minimal fetcher interface required by RecipeRunner."""
 
@@ -40,8 +50,17 @@ class RecipeRunner:
         """Execute a recipe and write extracted items as JSON Lines."""
         output_path = Path(self._config.output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        items_written = 0
+        requests = _expand_requests(recipe)
+        checkpoint_path = _checkpoint_path(recipe)
+        checkpoint = _load_checkpoint(
+            checkpoint_path=checkpoint_path,
+            recipe=recipe,
+            output_path=output_path,
+            request_count=len(requests),
+        )
+        next_request_index = checkpoint.next_request_index if checkpoint else 0
+        current_request_index = next_request_index
+        items_written = checkpoint.items_written if checkpoint else 0
         pages_attempted = 0
         requests_attempted = 0
         stop_reason: RunnerStopReason = "completed"
@@ -49,8 +68,10 @@ class RecipeRunner:
         max_items = recipe.execution.max_items
         max_seconds = recipe.execution.max_seconds
         delay_ms = recipe.execution.delay_ms
-        with output_path.open("w", encoding="utf-8") as output_file:
-            for request in _expand_requests(recipe):
+        file_mode = "a" if next_request_index > 0 and output_path.exists() else "w"
+        with output_path.open(file_mode, encoding="utf-8") as output_file:
+            for request_index in range(next_request_index, len(requests)):
+                request = requests[request_index]
                 if _max_seconds_reached(self._clock, started_at, max_seconds, pages_attempted):
                     stop_reason = "max_seconds_reached"
                     break
@@ -58,6 +79,7 @@ class RecipeRunner:
                 if _max_seconds_reached(self._clock, started_at, max_seconds, pages_attempted):
                     stop_reason = "max_seconds_reached"
                     break
+                current_request_index = request_index
                 pages_attempted += 1
                 response, request_attempts, stop_reason = self._fetch_with_retries(
                     request=request,
@@ -79,7 +101,28 @@ class RecipeRunner:
                 if not extracted_items:
                     stop_reason = "empty_page"
                     break
+                _write_checkpoint(
+                    checkpoint_path=checkpoint_path,
+                    recipe=recipe,
+                    output_path=output_path,
+                    next_request_index=request_index + 1,
+                    items_written=items_written,
+                    stop_reason="completed",
+                )
 
+        final_checkpoint_path = _finalize_checkpoint(
+            checkpoint_path=checkpoint_path,
+            recipe=recipe,
+            output_path=output_path,
+            next_request_index=_resume_request_index(
+                stop_reason=stop_reason,
+                current_request_index=current_request_index,
+                next_request_index=next_request_index,
+                pages_attempted=pages_attempted,
+            ),
+            items_written=items_written,
+            stop_reason=stop_reason,
+        )
         return CrawlResult(
             recipe_name=recipe.name,
             items_written=items_written,
@@ -87,6 +130,7 @@ class RecipeRunner:
             pages_attempted=pages_attempted,
             requests_attempted=requests_attempted,
             stop_reason=stop_reason,
+            checkpoint_path=final_checkpoint_path,
         )
 
     def _fetch_with_retries(
@@ -147,6 +191,102 @@ def _request_for_page(request: RequestSpec, query_param: str, page: int) -> Requ
     query = dict(request.query)
     query[query_param] = str(page)
     return request.model_copy(update={"query": query})
+
+
+def _checkpoint_path(recipe: Recipe) -> Path | None:
+    if not recipe.execution.checkpoint_path:
+        return None
+    return Path(recipe.execution.checkpoint_path)
+
+
+def _load_checkpoint(
+    checkpoint_path: Path | None,
+    recipe: Recipe,
+    output_path: Path,
+    request_count: int,
+) -> RunnerCheckpoint | None:
+    if checkpoint_path is None or not checkpoint_path.exists():
+        return None
+    checkpoint = RunnerCheckpoint.model_validate_json(checkpoint_path.read_text(encoding="utf-8"))
+    if checkpoint.recipe_name != recipe.name:
+        msg = (
+            "Checkpoint recipe mismatch: "
+            f"expected {recipe.name!r}, got {checkpoint.recipe_name!r}"
+        )
+        raise ValueError(msg)
+    if checkpoint.output_path != str(output_path):
+        msg = (
+            "Checkpoint output path mismatch: "
+            f"expected {output_path!s}, got {checkpoint.output_path!r}"
+        )
+        raise ValueError(msg)
+    if checkpoint.next_request_index > request_count:
+        msg = (
+            "Checkpoint request index out of range: "
+            f"{checkpoint.next_request_index} > {request_count}"
+        )
+        raise ValueError(msg)
+    return checkpoint
+
+
+def _write_checkpoint(
+    checkpoint_path: Path | None,
+    recipe: Recipe,
+    output_path: Path,
+    next_request_index: int,
+    items_written: int,
+    stop_reason: RunnerStopReason,
+) -> None:
+    if checkpoint_path is None:
+        return
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint = RunnerCheckpoint(
+        recipe_name=recipe.name,
+        next_request_index=next_request_index,
+        items_written=items_written,
+        output_path=str(output_path),
+        stop_reason=stop_reason,
+    )
+    checkpoint_path.write_text(
+        json.dumps(checkpoint.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _finalize_checkpoint(
+    checkpoint_path: Path | None,
+    recipe: Recipe,
+    output_path: Path,
+    next_request_index: int,
+    items_written: int,
+    stop_reason: RunnerStopReason,
+) -> str:
+    if checkpoint_path is None:
+        return ""
+    if stop_reason in {"completed", "empty_page", "max_items_reached"}:
+        if checkpoint_path.exists():
+            checkpoint_path.unlink()
+        return ""
+    _write_checkpoint(
+        checkpoint_path=checkpoint_path,
+        recipe=recipe,
+        output_path=output_path,
+        next_request_index=next_request_index,
+        items_written=items_written,
+        stop_reason=stop_reason,
+    )
+    return str(checkpoint_path)
+
+
+def _resume_request_index(
+    stop_reason: RunnerStopReason,
+    current_request_index: int,
+    next_request_index: int,
+    pages_attempted: int,
+) -> int:
+    if stop_reason in {"retry_exhausted", "non_success_status"}:
+        return current_request_index
+    return next_request_index + pages_attempted
 
 
 def _is_success(response: FetchResponse) -> bool:

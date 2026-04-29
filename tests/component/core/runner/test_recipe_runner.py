@@ -47,6 +47,31 @@ class SequencedFetcher:
         return response
 
 
+class PageAwareFetcher:
+    def __init__(self) -> None:
+        self.urls: list[str] = []
+
+    def fetch(self, request: RequestSpec) -> FetchResponse:
+        page = request.query["page"]
+        self.urls.append(f"{request.url}?page={page}")
+        if page == "2":
+            raise TimeoutError("temporary timeout")
+        items_by_page = {
+            "1": [
+                {"id": "p1", "name": "Keyboard", "price": 120},
+                {"id": "p2", "name": "Mouse", "price": 40},
+            ],
+            "3": [],
+        }
+        return FetchResponse(
+            url=request.url,
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_text=json.dumps({"items": items_by_page[page]}),
+            elapsed_ms=5,
+        )
+
+
 def test_recipe_runner_executes_query_page_pagination_to_jsonl(tmp_path: Path) -> None:
     recipe = Recipe.model_validate(
         {
@@ -294,6 +319,105 @@ def test_recipe_runner_stops_before_next_request_when_max_seconds_exceeded(
     ]
 
 
+def test_recipe_runner_writes_checkpoint_on_interrupted_run_and_resumes_next_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checkpoint_path = tmp_path / "products.checkpoint.json"
+    output_path = tmp_path / "products.jsonl"
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [
+                {
+                    "id": "list-products",
+                    "method": "GET",
+                    "url": "https://example.test/api/products",
+                    "query": {"page": "1"},
+                }
+            ],
+            "pagination": {
+                "strategy": "query_page",
+                "query_param": "page",
+                "start": 1,
+                "max_pages": 3,
+            },
+            "execution": {
+                "max_seconds": 1,
+                "checkpoint_path": str(checkpoint_path),
+            },
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    first_fetcher = FakeFetcher()
+    first_timeline = iter((0.0, 1.5))
+    monkeypatch.setattr(recipe_runner_module.time, "monotonic", lambda: next(first_timeline))
+    first_runner = RecipeRunner(
+        fetcher=first_fetcher,
+        config=RunnerConfig(output_path=str(output_path)),
+    )
+
+    first_result = first_runner.run(recipe)
+
+    assert first_result.items_written == 2
+    assert first_result.pages_attempted == 1
+    assert first_result.requests_attempted == 1
+    assert first_result.stop_reason == "max_seconds_reached"
+    assert first_result.checkpoint_path == str(checkpoint_path)
+    assert first_fetcher.urls == ["https://example.test/api/products?page=1"]
+    assert json.loads(checkpoint_path.read_text(encoding="utf-8")) == {
+        "recipe_name": "products-api",
+        "next_request_index": 1,
+        "items_written": 2,
+        "output_path": str(output_path),
+        "stop_reason": "max_seconds_reached",
+    }
+    assert output_path.read_text(encoding="utf-8") == (
+        '{"name": "Keyboard", "price": 120}\n'
+        '{"name": "Mouse", "price": 40}\n'
+    )
+
+    resumed_recipe = recipe.model_copy(
+        update={
+            "execution": recipe.execution.model_copy(
+                update={"max_seconds": None},
+            )
+        }
+    )
+    monkeypatch.setattr(recipe_runner_module.time, "monotonic", lambda: 0.0)
+    resumed_fetcher = FakeFetcher()
+    resumed_runner = RecipeRunner(
+        fetcher=resumed_fetcher,
+        config=RunnerConfig(output_path=str(output_path)),
+    )
+
+    resumed_result = resumed_runner.run(resumed_recipe)
+
+    assert resumed_result.items_written == 3
+    assert resumed_result.pages_attempted == 2
+    assert resumed_result.requests_attempted == 2
+    assert resumed_result.stop_reason == "empty_page"
+    assert resumed_result.checkpoint_path == ""
+    assert resumed_fetcher.urls == [
+        "https://example.test/api/products?page=2",
+        "https://example.test/api/products?page=3",
+    ]
+    assert not checkpoint_path.exists()
+    written_items = [
+        json.loads(line)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert written_items == [
+        {"name": "Keyboard", "price": 120},
+        {"name": "Mouse", "price": 40},
+        {"name": "Monitor", "price": 300},
+    ]
+
+
 def test_recipe_runner_stops_on_non_success_response(tmp_path: Path) -> None:
     class FailingFetcher:
         def fetch(self, request: RequestSpec) -> FetchResponse:
@@ -434,6 +558,64 @@ def test_recipe_runner_stops_with_retry_exhausted_after_retry_budget_ends(
     assert result.requests_attempted == 3
     assert result.stop_reason == "retry_exhausted"
     assert output_path.read_text(encoding="utf-8") == ""
+
+
+def test_recipe_runner_keeps_last_checkpoint_when_retry_exhausted_after_progress(
+    tmp_path: Path,
+) -> None:
+    checkpoint_path = tmp_path / "retry.checkpoint.json"
+    output_path = tmp_path / "retry-exhausted-products.jsonl"
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [
+                {
+                    "id": "list-products",
+                    "method": "GET",
+                    "url": "https://example.test/api/products",
+                    "query": {"page": "1"},
+                }
+            ],
+            "pagination": {
+                "strategy": "query_page",
+                "query_param": "page",
+                "start": 1,
+                "max_pages": 3,
+            },
+            "execution": {
+                "retry_attempts": 1,
+                "checkpoint_path": str(checkpoint_path),
+            },
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    runner = RecipeRunner(
+        fetcher=PageAwareFetcher(),
+        config=RunnerConfig(output_path=str(output_path)),
+    )
+
+    result = runner.run(recipe)
+
+    assert result.items_written == 2
+    assert result.pages_attempted == 2
+    assert result.requests_attempted == 3
+    assert result.stop_reason == "retry_exhausted"
+    assert result.checkpoint_path == str(checkpoint_path)
+    assert json.loads(checkpoint_path.read_text(encoding="utf-8")) == {
+        "recipe_name": "products-api",
+        "next_request_index": 1,
+        "items_written": 2,
+        "output_path": str(output_path),
+        "stop_reason": "retry_exhausted",
+    }
+    assert output_path.read_text(encoding="utf-8") == (
+        '{"name": "Keyboard", "price": 120}\n'
+        '{"name": "Mouse", "price": 40}\n'
+    )
 
 
 def test_recipe_runner_does_not_retry_non_retryable_challenge_status(

@@ -538,12 +538,18 @@ def run_recipe_command(recipe_path: str, output_path: str) -> int:
         config=RunnerConfig(output_path=output_path),
     )
     result = runner.run(recipe)
+    checkpoint_summary = (
+        f" checkpoint={result.checkpoint_path}"
+        if result.checkpoint_path
+        else ""
+    )
     print(
         "ai-crawler run: "
         f"recipe={result.recipe_name} "
         f"items_written={result.items_written} "
         f"stop_reason={result.stop_reason} "
         f"output={result.output_path}"
+        f"{checkpoint_summary}"
     )
     return 0
 
