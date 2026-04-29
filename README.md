@@ -223,8 +223,9 @@ npm publishing is automated with `.github/workflows/npm-publish.yml`.
 
 - push a tag matching the package version, for example `npm-v0.1.1`
 - or run the workflow manually with `workflow_dispatch`
-- the workflow now validates that `package.json`, `pyproject.toml`, and `src/ai_crawler/__init__.py` agree on the release version before publish
+- the workflow validates that `package.json`, `pyproject.toml`, and `src/ai_crawler/__init__.py` agree on the release version before publish
 - tag-triggered publishes also validate that the pushed tag matches `npm-v<package.json version>`
+- use `docs/release-runbook.md` for the full version bump, tagging, and post-publish smoke checklist
 
 Example tag flow:
 
