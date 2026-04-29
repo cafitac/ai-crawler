@@ -148,6 +148,100 @@ def test_recipe_runner_stops_after_max_items_and_keeps_partial_jsonl_valid(tmp_p
     ]
 
 
+def test_recipe_runner_applies_delay_only_between_requests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [
+                {
+                    "id": "list-products",
+                    "method": "GET",
+                    "url": "https://example.test/api/products",
+                    "query": {"page": "1"},
+                }
+            ],
+            "pagination": {
+                "strategy": "query_page",
+                "query_param": "page",
+                "start": 1,
+                "max_pages": 3,
+            },
+            "execution": {"delay_ms": 150},
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    output_path = tmp_path / "delayed-products.jsonl"
+    fetcher = FakeFetcher()
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(recipe_runner_module.time, "sleep", sleep_calls.append)
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+
+    result = runner.run(recipe)
+
+    assert result.items_written == 3
+    assert result.pages_attempted == 3
+    assert result.requests_attempted == 3
+    assert result.stop_reason == "empty_page"
+    assert sleep_calls == [0.15, 0.15]
+    assert fetcher.urls == [
+        "https://example.test/api/products?page=1",
+        "https://example.test/api/products?page=2",
+        "https://example.test/api/products?page=3",
+    ]
+
+
+def test_recipe_runner_skips_delay_after_terminal_stop_condition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [
+                {
+                    "id": "list-products",
+                    "method": "GET",
+                    "url": "https://example.test/api/products",
+                    "query": {"page": "1"},
+                }
+            ],
+            "pagination": {
+                "strategy": "query_page",
+                "query_param": "page",
+                "start": 1,
+                "max_pages": 3,
+            },
+            "execution": {"delay_ms": 150, "max_items": 2},
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    output_path = tmp_path / "terminal-stop-products.jsonl"
+    fetcher = FakeFetcher()
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(recipe_runner_module.time, "sleep", sleep_calls.append)
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+
+    result = runner.run(recipe)
+
+    assert result.items_written == 2
+    assert result.pages_attempted == 1
+    assert result.requests_attempted == 1
+    assert result.stop_reason == "max_items_reached"
+    assert sleep_calls == []
+    assert fetcher.urls == ["https://example.test/api/products?page=1"]
+
+
 def test_recipe_runner_stops_before_next_request_when_max_seconds_exceeded(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -179,9 +273,9 @@ def test_recipe_runner_stops_before_next_request_when_max_seconds_exceeded(
     )
     output_path = tmp_path / "timed-products.jsonl"
     fetcher = FakeFetcher()
-    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
     timeline = iter((0.0, 1.5))
     monkeypatch.setattr(recipe_runner_module.time, "monotonic", lambda: next(timeline))
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
 
     result = runner.run(recipe)
 
@@ -270,9 +364,9 @@ def test_recipe_runner_retries_retryable_status_once_then_succeeds(
         ]
     )
     output_path = tmp_path / "retried-products.jsonl"
-    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
     sleep_calls: list[float] = []
     monkeypatch.setattr(recipe_runner_module.time, "sleep", sleep_calls.append)
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
 
     result = runner.run(recipe)
 
@@ -327,9 +421,9 @@ def test_recipe_runner_stops_with_retry_exhausted_after_retry_budget_ends(
         ]
     )
     output_path = tmp_path / "retry-exhausted.jsonl"
-    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
     sleep_calls: list[float] = []
     monkeypatch.setattr(recipe_runner_module.time, "sleep", sleep_calls.append)
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
 
     result = runner.run(recipe)
 
@@ -370,9 +464,9 @@ def test_recipe_runner_does_not_retry_non_retryable_challenge_status(
         ]
     )
     output_path = tmp_path / "challenge.jsonl"
-    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
     sleep_calls: list[float] = []
     monkeypatch.setattr(recipe_runner_module.time, "sleep", sleep_calls.append)
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
 
     result = runner.run(recipe)
 
@@ -411,9 +505,9 @@ def test_recipe_runner_retries_transport_error_once_then_succeeds(
         ]
     )
     output_path = tmp_path / "transport-retried-products.jsonl"
-    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
     sleep_calls: list[float] = []
     monkeypatch.setattr(recipe_runner_module.time, "sleep", sleep_calls.append)
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
 
     result = runner.run(recipe)
 

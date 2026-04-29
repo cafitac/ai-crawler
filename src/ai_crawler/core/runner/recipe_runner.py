@@ -2,6 +2,7 @@
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -32,6 +33,8 @@ class RecipeRunner:
     def __init__(self, fetcher: RecipeFetcher, config: RunnerConfig) -> None:
         self._fetcher = fetcher
         self._config = config
+        self._clock = time.monotonic
+        self._sleep = time.sleep
 
     def run(self, recipe: Recipe) -> CrawlResult:
         """Execute a recipe and write extracted items as JSON Lines."""
@@ -42,12 +45,17 @@ class RecipeRunner:
         pages_attempted = 0
         requests_attempted = 0
         stop_reason: RunnerStopReason = "completed"
-        started_at = time.monotonic()
+        started_at = self._clock()
         max_items = recipe.execution.max_items
         max_seconds = recipe.execution.max_seconds
+        delay_ms = recipe.execution.delay_ms
         with output_path.open("w", encoding="utf-8") as output_file:
             for request in _expand_requests(recipe):
-                if _max_seconds_reached(started_at, max_seconds, pages_attempted):
+                if _max_seconds_reached(self._clock, started_at, max_seconds, pages_attempted):
+                    stop_reason = "max_seconds_reached"
+                    break
+                _sleep_between_requests(self._sleep, delay_ms, pages_attempted)
+                if _max_seconds_reached(self._clock, started_at, max_seconds, pages_attempted):
                     stop_reason = "max_seconds_reached"
                     break
                 pages_attempted += 1
@@ -97,19 +105,24 @@ class RecipeRunner:
                 response = self._fetcher.fetch(request)
             except Exception:
                 if attempts > retry_attempts or _max_seconds_reached_during_retry(
+                    self._clock,
                     started_at,
                     recipe,
                 ):
                     return None, attempts, "retry_exhausted"
-                _sleep_before_retry(retry_backoff_ms, attempts)
+                _sleep_before_retry(self._sleep, retry_backoff_ms, attempts)
                 continue
             if _is_success(response):
                 return response, attempts, "completed"
             if response.status_code not in retry_statuses:
                 return response, attempts, "non_success_status"
-            if attempts > retry_attempts or _max_seconds_reached_during_retry(started_at, recipe):
+            if attempts > retry_attempts or _max_seconds_reached_during_retry(
+                self._clock,
+                started_at,
+                recipe,
+            ):
                 return None, attempts, "retry_exhausted"
-            _sleep_before_retry(retry_backoff_ms, attempts)
+            _sleep_before_retry(self._sleep, retry_backoff_ms, attempts)
 
 
 def _expand_requests(recipe: Recipe) -> tuple[RequestSpec, ...]:
@@ -141,6 +154,7 @@ def _is_success(response: FetchResponse) -> bool:
 
 
 def _max_seconds_reached(
+    clock: Callable[[], float],
     started_at: float,
     max_seconds: int | None,
     pages_attempted: int,
@@ -148,19 +162,37 @@ def _max_seconds_reached(
     return (
         max_seconds is not None
         and pages_attempted > 0
-        and time.monotonic() - started_at >= max_seconds
+        and clock() - started_at >= max_seconds
     )
 
 
-def _max_seconds_reached_during_retry(started_at: float, recipe: Recipe) -> bool:
+def _max_seconds_reached_during_retry(
+    clock: Callable[[], float],
+    started_at: float,
+    recipe: Recipe,
+) -> bool:
     max_seconds = recipe.execution.max_seconds
-    return max_seconds is not None and time.monotonic() - started_at >= max_seconds
+    return max_seconds is not None and clock() - started_at >= max_seconds
 
 
-def _sleep_before_retry(retry_backoff_ms: int, attempts: int) -> None:
+def _sleep_between_requests(
+    sleep_fn: Callable[[float], object],
+    delay_ms: int,
+    pages_attempted: int,
+) -> None:
+    if delay_ms <= 0 or pages_attempted <= 0:
+        return
+    sleep_fn(delay_ms / 1000)
+
+
+def _sleep_before_retry(
+    sleep_fn: Callable[[float], object],
+    retry_backoff_ms: int,
+    attempts: int,
+) -> None:
     if retry_backoff_ms <= 0:
         return
-    time.sleep((retry_backoff_ms * attempts) / 1000)
+    sleep_fn((retry_backoff_ms * attempts) / 1000)
 
 
 def _extract_response_items(
