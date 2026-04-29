@@ -9,6 +9,9 @@ def test_classify_test_report_identifies_challenge_boundary() -> None:
             "first_response_status": 403,
             "content_type": "text/html",
             "body_sample": "<html><title>Just a moment...</title>Checking your browser</html>",
+            "stop_reason": "non_success_status",
+            "pages_attempted": 1,
+            "requests_attempted": 1,
             "failure_reason": "non_success_status",
         }
     )
@@ -18,6 +21,27 @@ def test_classify_test_report_identifies_challenge_boundary() -> None:
         "retryable": False,
         "requires_human": True,
         "summary": "challenge boundary detected; manual handoff or authorized session is required",
+    }
+
+
+def test_classify_test_report_identifies_retry_exhaustion() -> None:
+    classification = classify_test_report(
+        {
+            "first_response_status": 500,
+            "content_type": "application/json",
+            "body_sample": '{"error":"temporary"}',
+            "stop_reason": "retry_exhausted",
+            "pages_attempted": 1,
+            "requests_attempted": 3,
+            "failure_reason": "retry_exhausted",
+        }
+    )
+
+    assert classification == {
+        "category": "retry_exhausted",
+        "retryable": True,
+        "requires_human": False,
+        "summary": "retry budget exhausted after transient request failures",
     }
 
 

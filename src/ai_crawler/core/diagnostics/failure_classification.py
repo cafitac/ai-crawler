@@ -1,5 +1,4 @@
 """Classify deterministic test-report failures for AI harnesses."""
-
 from typing import Any
 
 _CHALLENGE_MARKERS = (
@@ -28,6 +27,13 @@ def classify_test_report(test_report: dict[str, Any]) -> dict[str, object]:
                 "challenge boundary detected; "
                 "manual handoff or authorized session is required"
             ),
+        }
+    if failure_reason == "retry_exhausted":
+        return {
+            "category": "retry_exhausted",
+            "retryable": True,
+            "requires_human": False,
+            "summary": "retry budget exhausted after transient request failures",
         }
     if failure_reason == "no_items_extracted":
         return {

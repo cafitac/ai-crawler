@@ -32,6 +32,21 @@ class ChallengeFetcher:
         )
 
 
+class RetryExhaustedFetcher:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def fetch(self, request: RequestSpec) -> FetchResponse:
+        self.calls += 1
+        return FetchResponse(
+            url=request.url,
+            status_code=500,
+            headers={"content-type": "application/json"},
+            body_text='{"error": "temporary"}',
+            elapsed_ms=3,
+        )
+
+
 def test_test_recipe_tool_runs_recipe_and_returns_crawl_result_artifact(tmp_path) -> None:
     recipe = Recipe(
         name="products-api",
@@ -68,6 +83,9 @@ def test_test_recipe_tool_runs_recipe_and_returns_crawl_result_artifact(tmp_path
         "first_response_status": 200,
         "content_type": "application/json",
         "body_sample": '{"items": [{"name": "Keyboard", "price": 120}]}',
+        "stop_reason": "completed",
+        "pages_attempted": 1,
+        "requests_attempted": 1,
         "failure_reason": "",
         "failure_classification": {
             "category": "success",
@@ -100,12 +118,48 @@ def test_test_recipe_tool_classifies_challenge_boundary(tmp_path) -> None:
     result = tool(action, EvidenceBundle(target_url=recipe.start_url, goal="collect products"))
 
     test_report = result.artifacts["test_report"]
+    assert test_report["stop_reason"] == "non_success_status"
+    assert test_report["pages_attempted"] == 1
+    assert test_report["requests_attempted"] == 1
     assert test_report["failure_reason"] == "non_success_status"
     assert test_report["failure_classification"] == {
         "category": "challenge_detected",
         "retryable": False,
         "requires_human": True,
         "summary": "challenge boundary detected; manual handoff or authorized session is required",
+    }
+
+
+def test_test_recipe_tool_reports_retry_exhaustion_as_retryable_failure(tmp_path) -> None:
+    recipe = Recipe(
+        name="flaky-api",
+        start_url="https://example.test/products",
+        requests=(RequestSpec(method="GET", url="https://example.test/api/products"),),
+        execution={"retry_attempts": 2, "retry_backoff_ms": 10, "retry_statuses": (500,)},
+    )
+    fetcher = RetryExhaustedFetcher()
+    tool = RecipeTestTool(fetcher=fetcher)
+    action = AgentAction(
+        name="test_recipe",
+        arguments={
+            "recipe": recipe.model_dump(mode="json"),
+            "output_path": str(tmp_path / "retry-exhausted.jsonl"),
+        },
+    )
+
+    result = tool(action, EvidenceBundle(target_url=recipe.start_url, goal="collect products"))
+
+    test_report = result.artifacts["test_report"]
+    assert fetcher.calls == 3
+    assert test_report["stop_reason"] == "retry_exhausted"
+    assert test_report["pages_attempted"] == 1
+    assert test_report["requests_attempted"] == 3
+    assert test_report["failure_reason"] == "retry_exhausted"
+    assert test_report["failure_classification"] == {
+        "category": "retry_exhausted",
+        "retryable": True,
+        "requires_human": False,
+        "summary": "retry budget exhausted after transient request failures",
     }
 
 

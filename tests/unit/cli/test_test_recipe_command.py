@@ -78,6 +78,9 @@ extract:
         "first_response_status": 200,
         "content_type": "application/json",
         "body_sample": '{"items": [{"name": "Keyboard", "price": 120}]}',
+        "stop_reason": "completed",
+        "pages_attempted": 1,
+        "requests_attempted": 1,
         "failure_reason": "",
         "failure_classification": {
             "category": "success",
