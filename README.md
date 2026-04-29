@@ -52,7 +52,7 @@ npx @cafitac/ai-crawler mcp
 Wrapper behavior:
 
 - inside the repo checkout: runs the local Python core with `uv run --project <repo> ai-crawler ...`
-- outside the repo checkout: runs the published Python core with `uvx --from "ai-crawler[all]" ai-crawler ...`
+- outside the repo checkout: runs the published Python core from GitHub with `uvx --from "git+https://github.com/cafitac/ai-crawler.git[all]" ai-crawler ...`
 - override the published Python package spec with `AI_CRAWLER_PYTHON_SPEC`
 - override the uvx Python version with `AI_CRAWLER_UVX_PYTHON`
 
