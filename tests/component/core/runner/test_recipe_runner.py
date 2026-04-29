@@ -126,6 +126,42 @@ def test_recipe_runner_executes_query_page_pagination_to_jsonl(tmp_path: Path) -
     ]
 
 
+def test_recipe_runner_rejects_concurrency_above_one_until_scheduler_exists(
+    tmp_path: Path,
+) -> None:
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [
+                {
+                    "id": "list-products",
+                    "method": "GET",
+                    "url": "https://example.test/api/products",
+                    "query": {"page": "1"},
+                }
+            ],
+            "pagination": {
+                "strategy": "query_page",
+                "query_param": "page",
+                "start": 1,
+                "max_pages": 3,
+            },
+            "execution": {"concurrency": 2},
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    output_path = tmp_path / "products.jsonl"
+    runner = RecipeRunner(fetcher=FakeFetcher(), config=RunnerConfig(output_path=str(output_path)))
+
+    with pytest.raises(ValueError, match="execution.concurrency > 1 is not supported yet"):
+        runner.run(recipe)
+
+
+
 def test_recipe_runner_stops_after_max_items_and_keeps_partial_jsonl_valid(tmp_path: Path) -> None:
     recipe = Recipe.model_validate(
         {
