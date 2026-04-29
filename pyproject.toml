@@ -24,7 +24,7 @@ classifiers = [
 dependencies = ["pydantic>=2.8", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.8"]
+dev = ["pytest>=8.0", "ruff>=0.8", "mypy>=1.17", "types-PyYAML>=6.0"]
 http = ["curl-cffi>=0.7"]
 browser = ["playwright>=1.48"]
 llm = ["httpx>=0.27"]
@@ -39,3 +39,17 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = [
+  "curl_cffi",
+  "playwright",
+  "playwright.*",
+  "mcp",
+  "mcp.*",
+]
+ignore_missing_imports = true

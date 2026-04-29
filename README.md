@@ -194,6 +194,12 @@ crawler = AICrawler(fetcher=my_fake_fetcher)
 
 ## Verification
 
+Fast local lint/type checks while iterating:
+
+```bash
+bash scripts/check-python.sh
+```
+
 Full project verification:
 
 ```bash
