@@ -33,6 +33,20 @@ class FakeFetcher:
         )
 
 
+class SequencedFetcher:
+    def __init__(self, responses: list[FetchResponse | Exception]) -> None:
+        self._responses = responses
+        self.calls = 0
+
+    def fetch(self, request: RequestSpec) -> FetchResponse:
+        del request
+        response = self._responses[self.calls]
+        self.calls += 1
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
 def test_recipe_runner_executes_query_page_pagination_to_jsonl(tmp_path: Path) -> None:
     recipe = Recipe.model_validate(
         {
@@ -215,3 +229,197 @@ def test_recipe_runner_stops_on_non_success_response(tmp_path: Path) -> None:
     assert result.requests_attempted == 1
     assert result.stop_reason == "non_success_status"
     assert output_path.read_text(encoding="utf-8") == ""
+
+
+def test_recipe_runner_retries_retryable_status_once_then_succeeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [{"method": "GET", "url": "https://example.test/api/products"}],
+            "execution": {
+                "retry_attempts": 1,
+                "retry_backoff_ms": 250,
+                "retry_statuses": [500],
+            },
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    fetcher = SequencedFetcher(
+        [
+            FetchResponse(
+                url="https://example.test/api/products",
+                status_code=500,
+                headers={"content-type": "application/json"},
+                body_text='{"items": []}',
+                elapsed_ms=5,
+            ),
+            FetchResponse(
+                url="https://example.test/api/products",
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body_text='{"items": [{"name": "Keyboard", "price": 120}]}',
+                elapsed_ms=5,
+            ),
+        ]
+    )
+    output_path = tmp_path / "retried-products.jsonl"
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(recipe_runner_module.time, "sleep", sleep_calls.append)
+
+    result = runner.run(recipe)
+
+    assert fetcher.calls == 2
+    assert sleep_calls == [0.25]
+    assert result.items_written == 1
+    assert result.pages_attempted == 1
+    assert result.requests_attempted == 2
+    assert result.stop_reason == "completed"
+    assert output_path.read_text(encoding="utf-8") == '{"name": "Keyboard", "price": 120}\n'
+
+
+def test_recipe_runner_stops_with_retry_exhausted_after_retry_budget_ends(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [{"method": "GET", "url": "https://example.test/api/products"}],
+            "execution": {
+                "retry_attempts": 2,
+                "retry_backoff_ms": 100,
+                "retry_statuses": [500],
+            },
+        }
+    )
+    fetcher = SequencedFetcher(
+        [
+            FetchResponse(
+                url="https://example.test/api/products",
+                status_code=500,
+                headers={"content-type": "application/json"},
+                body_text='{"items": []}',
+                elapsed_ms=5,
+            ),
+            FetchResponse(
+                url="https://example.test/api/products",
+                status_code=500,
+                headers={"content-type": "application/json"},
+                body_text='{"items": []}',
+                elapsed_ms=5,
+            ),
+            FetchResponse(
+                url="https://example.test/api/products",
+                status_code=500,
+                headers={"content-type": "application/json"},
+                body_text='{"items": []}',
+                elapsed_ms=5,
+            ),
+        ]
+    )
+    output_path = tmp_path / "retry-exhausted.jsonl"
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(recipe_runner_module.time, "sleep", sleep_calls.append)
+
+    result = runner.run(recipe)
+
+    assert fetcher.calls == 3
+    assert sleep_calls == [0.1, 0.2]
+    assert result.items_written == 0
+    assert result.pages_attempted == 1
+    assert result.requests_attempted == 3
+    assert result.stop_reason == "retry_exhausted"
+    assert output_path.read_text(encoding="utf-8") == ""
+
+
+def test_recipe_runner_does_not_retry_non_retryable_challenge_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [{"method": "GET", "url": "https://example.test/api/products"}],
+            "execution": {
+                "retry_attempts": 3,
+                "retry_backoff_ms": 100,
+                "retry_statuses": [500],
+            },
+        }
+    )
+    fetcher = SequencedFetcher(
+        [
+            FetchResponse(
+                url="https://example.test/api/products",
+                status_code=403,
+                headers={"content-type": "text/html"},
+                body_text="challenge",
+                elapsed_ms=5,
+            )
+        ]
+    )
+    output_path = tmp_path / "challenge.jsonl"
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(recipe_runner_module.time, "sleep", sleep_calls.append)
+
+    result = runner.run(recipe)
+
+    assert fetcher.calls == 1
+    assert sleep_calls == []
+    assert result.requests_attempted == 1
+    assert result.stop_reason == "non_success_status"
+
+
+def test_recipe_runner_retries_transport_error_once_then_succeeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [{"method": "GET", "url": "https://example.test/api/products"}],
+            "execution": {"retry_attempts": 1, "retry_backoff_ms": 50},
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    fetcher = SequencedFetcher(
+        [
+            TimeoutError("temporary timeout"),
+            FetchResponse(
+                url="https://example.test/api/products",
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body_text='{"items": [{"name": "Keyboard", "price": 120}]}',
+                elapsed_ms=5,
+            ),
+        ]
+    )
+    output_path = tmp_path / "transport-retried-products.jsonl"
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(recipe_runner_module.time, "sleep", sleep_calls.append)
+
+    result = runner.run(recipe)
+
+    assert fetcher.calls == 2
+    assert sleep_calls == [0.05]
+    assert result.items_written == 1
+    assert result.pages_attempted == 1
+    assert result.requests_attempted == 2
+    assert result.stop_reason == "completed"
