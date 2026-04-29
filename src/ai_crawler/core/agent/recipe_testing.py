@@ -92,6 +92,7 @@ def _test_report(fetcher: RecordingRecipeFetcher, crawl_result: CrawlResult) -> 
         "body_sample": "",
         "stop_reason": crawl_result.stop_reason,
         "pages_scheduled": crawl_result.pages_scheduled,
+        "pages_completed": crawl_result.pages_completed,
         "pages_attempted": crawl_result.pages_attempted,
         "requests_attempted": crawl_result.requests_attempted,
         "failure_reason": _failure_reason(response=response, crawl_result=crawl_result),

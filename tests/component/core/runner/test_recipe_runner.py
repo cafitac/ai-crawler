@@ -492,6 +492,7 @@ def test_recipe_runner_stops_concurrent_run_when_max_seconds_expires(
     result = result_holder["result"]
     assert result.items_written == 1
     assert result.pages_scheduled == 3
+    assert result.pages_completed == 1
     assert result.pages_attempted == 1
     assert result.requests_attempted == 1
     assert result.stop_reason == "max_seconds_reached"
@@ -542,6 +543,7 @@ def test_recipe_runner_stops_after_max_items_and_keeps_partial_jsonl_valid(tmp_p
     result = runner.run(recipe)
 
     assert result.items_written == 2
+    assert result.pages_completed == 0
     assert result.pages_attempted == 1
     assert result.requests_attempted == 1
     assert result.stop_reason == "max_items_reached"
@@ -594,6 +596,7 @@ def test_recipe_runner_stops_concurrent_run_at_max_items_without_fetching_later_
     assert fetcher.page_two_done.is_set()
     assert result.items_written == 2
     assert result.pages_scheduled == 2
+    assert result.pages_completed == 1
     assert result.pages_attempted == 2
     assert result.requests_attempted == 2
     assert result.stop_reason == "max_items_reached"

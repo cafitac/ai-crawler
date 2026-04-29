@@ -36,6 +36,7 @@ class RunnerCheckpoint(DomainModel):
 class RunState:
     items_written: int
     pages_scheduled: int
+    pages_completed: int
     pages_attempted: int
     requests_attempted: int
     stop_reason: RunnerStopReason
@@ -122,6 +123,7 @@ class RecipeRunner:
             items_written=state.items_written,
             output_path=str(output_path),
             pages_scheduled=state.pages_scheduled,
+            pages_completed=state.pages_completed,
             pages_attempted=state.pages_attempted,
             requests_attempted=state.requests_attempted,
             stop_reason=state.stop_reason,
@@ -141,6 +143,7 @@ class RecipeRunner:
     ) -> RunState:
         current_request_index = next_request_index
         pages_scheduled = 0
+        pages_completed = 0
         pages_attempted = 0
         requests_attempted = 0
         stop_reason: RunnerStopReason = "completed"
@@ -176,6 +179,7 @@ class RecipeRunner:
             )
             if stop_reason == "max_items_reached":
                 break
+            pages_completed += 1
             if not extracted_items:
                 stop_reason = "empty_page"
                 break
@@ -190,6 +194,7 @@ class RecipeRunner:
         return RunState(
             items_written=items_written,
             pages_scheduled=pages_scheduled,
+            pages_completed=pages_completed,
             pages_attempted=pages_attempted,
             requests_attempted=requests_attempted,
             stop_reason=stop_reason,
@@ -266,6 +271,7 @@ class RecipeRunner:
         current_request_index = next_request_index
         next_flush_index = next_request_index
         pages_scheduled = next_schedule_offset
+        pages_completed = 0
         pages_attempted = 0
         requests_attempted = 0
         stop_reason: RunnerStopReason = "completed"
@@ -281,6 +287,7 @@ class RecipeRunner:
                 terminal_state = RunState(
                     items_written=items_written,
                     pages_scheduled=pages_scheduled,
+                    pages_completed=pages_completed,
                     pages_attempted=pages_attempted,
                     requests_attempted=requests_attempted,
                     stop_reason="max_seconds_reached",
@@ -296,6 +303,7 @@ class RecipeRunner:
                 terminal_state = RunState(
                     items_written=items_written,
                     pages_scheduled=pages_scheduled,
+                    pages_completed=pages_completed,
                     pages_attempted=pages_attempted,
                     requests_attempted=requests_attempted,
                     stop_reason="max_seconds_reached",
@@ -318,6 +326,7 @@ class RecipeRunner:
                     terminal_state = RunState(
                         items_written=items_written,
                         pages_scheduled=pages_scheduled,
+                        pages_completed=pages_completed,
                         pages_attempted=pages_attempted,
                         requests_attempted=requests_attempted,
                         stop_reason=stop_reason,
@@ -335,17 +344,20 @@ class RecipeRunner:
                     terminal_state = RunState(
                         items_written=items_written,
                         pages_scheduled=pages_scheduled,
+                        pages_completed=pages_completed,
                         pages_attempted=pages_attempted,
                         requests_attempted=requests_attempted,
                         stop_reason=stop_reason,
                         current_request_index=current_request_index,
                     )
                     break
+                pages_completed += 1
                 if not extracted_items:
                     stop_reason = "empty_page"
                     terminal_state = RunState(
                         items_written=items_written,
                         pages_scheduled=pages_scheduled,
+                        pages_completed=pages_completed,
                         pages_attempted=pages_attempted,
                         requests_attempted=requests_attempted,
                         stop_reason=stop_reason,
@@ -398,6 +410,7 @@ class RecipeRunner:
         return RunState(
             items_written=items_written,
             pages_scheduled=pages_scheduled,
+            pages_completed=pages_completed,
             pages_attempted=pages_attempted,
             requests_attempted=requests_attempted,
             stop_reason=stop_reason,

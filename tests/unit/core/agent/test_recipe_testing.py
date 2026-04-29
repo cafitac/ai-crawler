@@ -75,6 +75,7 @@ def test_test_recipe_tool_runs_recipe_and_returns_crawl_result_artifact(tmp_path
         "items_written": 1,
         "output_path": str(output_path),
         "pages_scheduled": 1,
+        "pages_completed": 1,
         "pages_attempted": 1,
         "requests_attempted": 1,
         "stop_reason": "completed",
@@ -86,6 +87,7 @@ def test_test_recipe_tool_runs_recipe_and_returns_crawl_result_artifact(tmp_path
         "body_sample": '{"items": [{"name": "Keyboard", "price": 120}]}',
         "stop_reason": "completed",
         "pages_scheduled": 1,
+        "pages_completed": 1,
         "pages_attempted": 1,
         "requests_attempted": 1,
         "failure_reason": "",
@@ -122,6 +124,7 @@ def test_test_recipe_tool_classifies_challenge_boundary(tmp_path) -> None:
     test_report = result.artifacts["test_report"]
     assert test_report["stop_reason"] == "non_success_status"
     assert test_report["pages_scheduled"] == 1
+    assert test_report["pages_completed"] == 0
     assert test_report["pages_attempted"] == 1
     assert test_report["requests_attempted"] == 1
     assert test_report["failure_reason"] == "non_success_status"
@@ -156,6 +159,7 @@ def test_test_recipe_tool_reports_retry_exhaustion_as_retryable_failure(tmp_path
     assert fetcher.calls == 3
     assert test_report["stop_reason"] == "retry_exhausted"
     assert test_report["pages_scheduled"] == 1
+    assert test_report["pages_completed"] == 0
     assert test_report["pages_attempted"] == 1
     assert test_report["requests_attempted"] == 3
     assert test_report["failure_reason"] == "retry_exhausted"

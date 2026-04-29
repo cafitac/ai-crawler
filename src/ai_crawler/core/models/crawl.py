@@ -13,6 +13,7 @@ class CrawlResult(DomainModel):
     items_written: int = Field(ge=0)
     output_path: str = Field(min_length=1)
     pages_scheduled: int = Field(default=0, ge=0)
+    pages_completed: int = Field(default=0, ge=0)
     pages_attempted: int = Field(default=0, ge=0)
     requests_attempted: int = Field(default=0, ge=0)
     stop_reason: RunnerStopReason = "completed"
