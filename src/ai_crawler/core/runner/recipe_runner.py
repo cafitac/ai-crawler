@@ -48,6 +48,7 @@ class RecipeRunner:
 
     def run(self, recipe: Recipe) -> CrawlResult:
         """Execute a recipe and write extracted items as JSON Lines."""
+        _validate_execution_mode(recipe)
         output_path = Path(self._config.output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         requests = _expand_requests(recipe)
@@ -167,6 +168,16 @@ class RecipeRunner:
             ):
                 return None, attempts, "retry_exhausted"
             _sleep_before_retry(self._sleep, retry_backoff_ms, attempts)
+
+
+def _validate_execution_mode(recipe: Recipe) -> None:
+    if recipe.execution.concurrency > 1:
+        msg = (
+            "execution.concurrency > 1 is not supported yet; "
+            "use the sequential runner until the async scheduler lands"
+        )
+        raise ValueError(msg)
+
 
 
 def _expand_requests(recipe: Recipe) -> tuple[RequestSpec, ...]:
