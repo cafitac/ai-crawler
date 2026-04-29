@@ -1,0 +1,42 @@
+{
+  "name": "@cafitac/ai-crawler",
+  "version": "0.1.0",
+  "description": "npm delivery wrapper for the ai-crawler Python CLI",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "ai-crawler": "bin/ai-crawler.cjs"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test",
+    "pack:check": "npm pack --dry-run"
+  },
+  "keywords": [
+    "crawler",
+    "ai",
+    "mcp",
+    "wrapper",
+    "network"
+  ],
+  "homepage": "https://github.com/cafitac/ai-crawler",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cafitac/ai-crawler.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cafitac/ai-crawler/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "packageManager": "npm@11.5.2"
+}

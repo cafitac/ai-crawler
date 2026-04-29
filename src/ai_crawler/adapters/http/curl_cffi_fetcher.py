@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
 from ai_crawler.adapters.http.transport import HttpTransport
 from ai_crawler.core.models import FetchOptions, FetchResponse, RequestSpec
@@ -43,7 +43,7 @@ class CurlCffiFetcher:
         except ImportError as exc:
             msg = "curl-cffi is required for CurlCffiFetcher without an injected transport"
             raise RuntimeError(msg) from exc
-        return requests.Session()
+        return cast(HttpTransport, requests.Session())
 
 
 def _elapsed_ms(response: Any) -> int:
