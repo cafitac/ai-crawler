@@ -44,13 +44,13 @@ uv run --extra dev python -m ai_crawler.release.npm_publish --event-name workflo
 4. create a tag matching `npm-v<version>`
 5. push the tag
 
-Example for `0.1.1`:
+Example for `0.1.2`:
 
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag npm-v0.1.1
-git push origin npm-v0.1.1
+git tag npm-v0.1.2
+git push origin npm-v0.1.2
 ```
 
 The workflow validates that the pushed ref exactly matches `npm-v<package.json version>` before publishing.
@@ -76,10 +76,10 @@ Then verify the real published artifact from outside the repo:
 ```bash
 tmpdir=$(mktemp -d)
 cd "$tmpdir"
-npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- --version
-npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- doctor
-npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- mcp-config --client hermes --launcher npm
-npm install @cafitac/ai-crawler@0.1.1
+npm exec --yes --package @cafitac/ai-crawler@0.1.2 ai-crawler -- --version
+npm exec --yes --package @cafitac/ai-crawler@0.1.2 ai-crawler -- doctor
+npm exec --yes --package @cafitac/ai-crawler@0.1.2 ai-crawler -- mcp-config --client hermes --launcher npm
+npm install @cafitac/ai-crawler@0.1.2
 ./node_modules/.bin/ai-crawler --version
 ./node_modules/.bin/ai-crawler doctor
 ```
@@ -87,7 +87,7 @@ npm install @cafitac/ai-crawler@0.1.1
 For MCP onboarding smoke, also verify the published wrapper can emit npm-first client config:
 
 ```bash
-npm exec --yes --package @cafitac/ai-crawler@0.1.1 ai-crawler -- mcp-config --client hermes --launcher npm
+npm exec --yes --package @cafitac/ai-crawler@0.1.2 ai-crawler -- mcp-config --client hermes --launcher npm
 ```
 
 ## Failure triage

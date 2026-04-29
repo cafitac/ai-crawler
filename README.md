@@ -221,7 +221,7 @@ The Python SDK remains the stable embedded/programmatic surface. The npm package
 
 npm publishing is automated with `.github/workflows/npm-publish.yml`.
 
-- push a tag matching the package version, for example `npm-v0.1.1`
+- push a tag matching the package version, for example `npm-v0.1.2`
 - or run the workflow manually with `workflow_dispatch`
 - the workflow validates that `package.json`, `pyproject.toml`, and `src/ai_crawler/__init__.py` agree on the release version before publish
 - tag-triggered publishes also validate that the pushed tag matches `npm-v<package.json version>`
@@ -230,8 +230,8 @@ npm publishing is automated with `.github/workflows/npm-publish.yml`.
 Example tag flow:
 
 ```bash
-git tag npm-v0.1.1
-git push origin npm-v0.1.1
+git tag npm-v0.1.2
+git push origin npm-v0.1.2
 ```
 
 
