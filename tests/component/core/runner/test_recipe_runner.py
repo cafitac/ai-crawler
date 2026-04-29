@@ -1,6 +1,7 @@
 """Recipe runner component tests."""
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -72,6 +73,39 @@ class PageAwareFetcher:
         )
 
 
+class OutOfOrderFetcher:
+    def __init__(self) -> None:
+        self.urls: list[str] = []
+        self.completed_pages: list[str] = []
+        self._lock = threading.Lock()
+        self._release_page_one = threading.Event()
+
+    def fetch(self, request: RequestSpec) -> FetchResponse:
+        page = request.query["page"]
+        with self._lock:
+            self.urls.append(f"{request.url}?page={page}")
+        if page == "1":
+            released = self._release_page_one.wait(timeout=1)
+            assert released, "page 1 should be released after later pages complete"
+        else:
+            with self._lock:
+                self.completed_pages.append(page)
+                if sorted(self.completed_pages) == ["2", "3"]:
+                    self._release_page_one.set()
+        items_by_page = {
+            "1": [{"id": "p1", "name": "Keyboard", "price": 120}],
+            "2": [{"id": "p2", "name": "Mouse", "price": 40}],
+            "3": [],
+        }
+        return FetchResponse(
+            url=request.url,
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_text=json.dumps({"items": items_by_page[page]}),
+            elapsed_ms=5,
+        )
+
+
 def test_recipe_runner_executes_query_page_pagination_to_jsonl(tmp_path: Path) -> None:
     recipe = Recipe.model_validate(
         {
@@ -126,9 +160,7 @@ def test_recipe_runner_executes_query_page_pagination_to_jsonl(tmp_path: Path) -
     ]
 
 
-def test_recipe_runner_rejects_concurrency_above_one_until_scheduler_exists(
-    tmp_path: Path,
-) -> None:
+def test_recipe_runner_preserves_request_order_under_concurrency(tmp_path: Path) -> None:
     recipe = Recipe.model_validate(
         {
             "name": "products-api",
@@ -147,7 +179,55 @@ def test_recipe_runner_rejects_concurrency_above_one_until_scheduler_exists(
                 "start": 1,
                 "max_pages": 3,
             },
-            "execution": {"concurrency": 2},
+            "execution": {"concurrency": 3},
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    output_path = tmp_path / "concurrent-products.jsonl"
+    fetcher = OutOfOrderFetcher()
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+
+    result = runner.run(recipe)
+
+    assert result.items_written == 2
+    assert result.pages_attempted == 3
+    assert result.requests_attempted == 3
+    assert result.stop_reason == "empty_page"
+    assert sorted(fetcher.completed_pages) == ["2", "3"]
+    written_items = [
+        json.loads(line)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert written_items == [
+        {"name": "Keyboard", "price": 120},
+        {"name": "Mouse", "price": 40},
+    ]
+
+
+
+def test_recipe_runner_rejects_delay_rate_control_with_concurrency(tmp_path: Path) -> None:
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [
+                {
+                    "id": "list-products",
+                    "method": "GET",
+                    "url": "https://example.test/api/products",
+                    "query": {"page": "1"},
+                }
+            ],
+            "pagination": {
+                "strategy": "query_page",
+                "query_param": "page",
+                "start": 1,
+                "max_pages": 3,
+            },
+            "execution": {"concurrency": 2, "delay_ms": 150},
             "extract": {
                 "item_path": "$.items[*]",
                 "fields": {"name": "$.name", "price": "$.price"},
@@ -157,7 +237,10 @@ def test_recipe_runner_rejects_concurrency_above_one_until_scheduler_exists(
     output_path = tmp_path / "products.jsonl"
     runner = RecipeRunner(fetcher=FakeFetcher(), config=RunnerConfig(output_path=str(output_path)))
 
-    with pytest.raises(ValueError, match="execution.concurrency > 1 is not supported yet"):
+    with pytest.raises(
+        ValueError,
+        match="execution.delay_ms with concurrency > 1 is not supported yet",
+    ):
         runner.run(recipe)
 
 

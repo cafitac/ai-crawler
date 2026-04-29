@@ -1,8 +1,10 @@
 """Deterministic recipe runner."""
 
+import asyncio
 import json
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -30,11 +32,25 @@ class RunnerCheckpoint(DomainModel):
     stop_reason: RunnerStopReason
 
 
+@dataclass(slots=True)
+class RunState:
+    items_written: int
+    pages_attempted: int
+    requests_attempted: int
+    stop_reason: RunnerStopReason
+    current_request_index: int
+
+
 class RecipeFetcher(Protocol):
     """Minimal fetcher interface required by RecipeRunner."""
 
     def fetch(self, request: RequestSpec) -> FetchResponse:
         """Fetch one normalized request."""
+
+
+class TextWriter(Protocol):
+    def write(self, text: str) -> object:
+        """Write text to the output sink."""
 
 
 class RecipeRunner:
@@ -60,55 +76,31 @@ class RecipeRunner:
             request_count=len(requests),
         )
         next_request_index = checkpoint.next_request_index if checkpoint else 0
-        current_request_index = next_request_index
         items_written = checkpoint.items_written if checkpoint else 0
-        pages_attempted = 0
-        requests_attempted = 0
-        stop_reason: RunnerStopReason = "completed"
         started_at = self._clock()
-        max_items = recipe.execution.max_items
-        max_seconds = recipe.execution.max_seconds
-        delay_ms = recipe.execution.delay_ms
         file_mode = "a" if next_request_index > 0 and output_path.exists() else "w"
         with output_path.open(file_mode, encoding="utf-8") as output_file:
-            for request_index in range(next_request_index, len(requests)):
-                request = requests[request_index]
-                if _max_seconds_reached(self._clock, started_at, max_seconds, pages_attempted):
-                    stop_reason = "max_seconds_reached"
-                    break
-                _sleep_between_requests(self._sleep, delay_ms, pages_attempted)
-                if _max_seconds_reached(self._clock, started_at, max_seconds, pages_attempted):
-                    stop_reason = "max_seconds_reached"
-                    break
-                current_request_index = request_index
-                pages_attempted += 1
-                response, request_attempts, stop_reason = self._fetch_with_retries(
-                    request=request,
+            if recipe.execution.concurrency == 1:
+                state = self._run_sequential(
                     recipe=recipe,
+                    requests=requests,
+                    output_file=output_file,
+                    output_path=output_path,
+                    checkpoint_path=checkpoint_path,
+                    next_request_index=next_request_index,
+                    items_written=items_written,
                     started_at=started_at,
                 )
-                requests_attempted += request_attempts
-                if response is None or stop_reason == "non_success_status":
-                    break
-                extracted_items = _extract_response_items(response, recipe)
-                for item in extracted_items:
-                    output_file.write(json.dumps(item, ensure_ascii=False) + "\n")
-                    items_written += 1
-                    if max_items is not None and items_written >= max_items:
-                        stop_reason = "max_items_reached"
-                        break
-                if stop_reason == "max_items_reached":
-                    break
-                if not extracted_items:
-                    stop_reason = "empty_page"
-                    break
-                _write_checkpoint(
-                    checkpoint_path=checkpoint_path,
+            else:
+                state = self._run_concurrent(
                     recipe=recipe,
+                    requests=requests,
+                    output_file=output_file,
                     output_path=output_path,
-                    next_request_index=request_index + 1,
+                    checkpoint_path=checkpoint_path,
+                    next_request_index=next_request_index,
                     items_written=items_written,
-                    stop_reason="completed",
+                    started_at=started_at,
                 )
 
         final_checkpoint_path = _finalize_checkpoint(
@@ -116,23 +108,173 @@ class RecipeRunner:
             recipe=recipe,
             output_path=output_path,
             next_request_index=_resume_request_index(
-                stop_reason=stop_reason,
-                current_request_index=current_request_index,
+                stop_reason=state.stop_reason,
+                current_request_index=state.current_request_index,
                 next_request_index=next_request_index,
-                pages_attempted=pages_attempted,
+                pages_attempted=state.pages_attempted,
             ),
-            items_written=items_written,
-            stop_reason=stop_reason,
+            items_written=state.items_written,
+            stop_reason=state.stop_reason,
         )
         return CrawlResult(
             recipe_name=recipe.name,
-            items_written=items_written,
+            items_written=state.items_written,
             output_path=str(output_path),
+            pages_attempted=state.pages_attempted,
+            requests_attempted=state.requests_attempted,
+            stop_reason=state.stop_reason,
+            checkpoint_path=final_checkpoint_path,
+        )
+
+    def _run_sequential(
+        self,
+        recipe: Recipe,
+        requests: tuple[RequestSpec, ...],
+        output_file: TextWriter,
+        output_path: Path,
+        checkpoint_path: Path | None,
+        next_request_index: int,
+        items_written: int,
+        started_at: float,
+    ) -> RunState:
+        current_request_index = next_request_index
+        pages_attempted = 0
+        requests_attempted = 0
+        stop_reason: RunnerStopReason = "completed"
+        max_items = recipe.execution.max_items
+        max_seconds = recipe.execution.max_seconds
+        delay_ms = recipe.execution.delay_ms
+        for request_index in range(next_request_index, len(requests)):
+            request = requests[request_index]
+            if _max_seconds_reached(self._clock, started_at, max_seconds, pages_attempted):
+                stop_reason = "max_seconds_reached"
+                break
+            _sleep_between_requests(self._sleep, delay_ms, pages_attempted)
+            if _max_seconds_reached(self._clock, started_at, max_seconds, pages_attempted):
+                stop_reason = "max_seconds_reached"
+                break
+            current_request_index = request_index
+            pages_attempted += 1
+            response, request_attempts, stop_reason = self._fetch_with_retries(
+                request=request,
+                recipe=recipe,
+                started_at=started_at,
+            )
+            requests_attempted += request_attempts
+            if response is None or stop_reason == "non_success_status":
+                break
+            extracted_items = _extract_response_items(response, recipe)
+            items_written, stop_reason = _write_items(
+                output_file=output_file,
+                items=extracted_items,
+                items_written=items_written,
+                max_items=max_items,
+            )
+            if stop_reason == "max_items_reached":
+                break
+            if not extracted_items:
+                stop_reason = "empty_page"
+                break
+            _write_checkpoint(
+                checkpoint_path=checkpoint_path,
+                recipe=recipe,
+                output_path=output_path,
+                next_request_index=request_index + 1,
+                items_written=items_written,
+                stop_reason="completed",
+            )
+        return RunState(
+            items_written=items_written,
             pages_attempted=pages_attempted,
             requests_attempted=requests_attempted,
             stop_reason=stop_reason,
-            checkpoint_path=final_checkpoint_path,
+            current_request_index=current_request_index,
         )
+
+    def _run_concurrent(
+        self,
+        recipe: Recipe,
+        requests: tuple[RequestSpec, ...],
+        output_file: TextWriter,
+        output_path: Path,
+        checkpoint_path: Path | None,
+        next_request_index: int,
+        items_written: int,
+        started_at: float,
+    ) -> RunState:
+        current_request_index = next_request_index
+        requests_to_fetch = tuple(
+            enumerate(requests[next_request_index:], start=next_request_index)
+        )
+        results = asyncio.run(
+            self._fetch_requests_concurrently(
+                recipe=recipe,
+                requests_to_fetch=requests_to_fetch,
+                started_at=started_at,
+            )
+        )
+        pages_attempted = 0
+        requests_attempted = 0
+        stop_reason: RunnerStopReason = "completed"
+        max_items = recipe.execution.max_items
+        for request_index, _request in requests_to_fetch:
+            current_request_index = request_index
+            pages_attempted += 1
+            response, request_attempts, stop_reason = results[request_index]
+            requests_attempted += request_attempts
+            if response is None or stop_reason == "non_success_status":
+                break
+            extracted_items = _extract_response_items(response, recipe)
+            items_written, stop_reason = _write_items(
+                output_file=output_file,
+                items=extracted_items,
+                items_written=items_written,
+                max_items=max_items,
+            )
+            if stop_reason == "max_items_reached":
+                break
+            if not extracted_items:
+                stop_reason = "empty_page"
+                break
+            _write_checkpoint(
+                checkpoint_path=checkpoint_path,
+                recipe=recipe,
+                output_path=output_path,
+                next_request_index=request_index + 1,
+                items_written=items_written,
+                stop_reason="completed",
+            )
+        return RunState(
+            items_written=items_written,
+            pages_attempted=pages_attempted,
+            requests_attempted=requests_attempted,
+            stop_reason=stop_reason,
+            current_request_index=current_request_index,
+        )
+
+    async def _fetch_requests_concurrently(
+        self,
+        recipe: Recipe,
+        requests_to_fetch: tuple[tuple[int, RequestSpec], ...],
+        started_at: float,
+    ) -> dict[int, tuple[FetchResponse | None, int, RunnerStopReason]]:
+        semaphore = asyncio.Semaphore(recipe.execution.concurrency)
+        results: dict[int, tuple[FetchResponse | None, int, RunnerStopReason]] = {}
+
+        async def worker(request_index: int, request: RequestSpec) -> None:
+            async with semaphore:
+                result = await asyncio.to_thread(
+                    self._fetch_with_retries,
+                    request=request,
+                    recipe=recipe,
+                    started_at=started_at,
+                )
+                results[request_index] = result
+
+        await asyncio.gather(
+            *(worker(request_index, request) for request_index, request in requests_to_fetch)
+        )
+        return results
 
     def _fetch_with_retries(
         self,
@@ -171,11 +313,13 @@ class RecipeRunner:
 
 
 def _validate_execution_mode(recipe: Recipe) -> None:
-    if recipe.execution.concurrency > 1:
-        msg = (
-            "execution.concurrency > 1 is not supported yet; "
-            "use the sequential runner until the async scheduler lands"
-        )
+    if recipe.execution.concurrency <= 1:
+        return
+    if recipe.execution.delay_ms > 0:
+        msg = "execution.delay_ms with concurrency > 1 is not supported yet"
+        raise ValueError(msg)
+    if recipe.execution.max_seconds is not None:
+        msg = "execution.max_seconds with concurrency > 1 is not supported yet"
         raise ValueError(msg)
 
 
@@ -344,6 +488,24 @@ def _sleep_before_retry(
     if retry_backoff_ms <= 0:
         return
     sleep_fn((retry_backoff_ms * attempts) / 1000)
+
+
+
+def _write_items(
+    output_file: TextWriter,
+    items: tuple[dict[str, object], ...],
+    items_written: int,
+    max_items: int | None,
+) -> tuple[int, RunnerStopReason]:
+    stop_reason: RunnerStopReason = "completed"
+    for item in items:
+        output_file.write(json.dumps(item, ensure_ascii=False) + "\n")
+        items_written += 1
+        if max_items is not None and items_written >= max_items:
+            stop_reason = "max_items_reached"
+            break
+    return items_written, stop_reason
+
 
 
 def _extract_response_items(
