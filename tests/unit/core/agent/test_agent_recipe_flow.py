@@ -145,6 +145,7 @@ def test_agent_controller_hands_generated_recipe_artifact_to_test_recipe_tool(tm
         "output_path": str(output_path),
         "pages_scheduled": 1,
         "pages_completed": 1,
+        "pages_failed": 0,
         "pages_attempted": 1,
         "requests_attempted": 1,
         "stop_reason": "empty_page",

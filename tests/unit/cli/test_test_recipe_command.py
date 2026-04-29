@@ -62,6 +62,7 @@ extract:
         "items_written=1 "
         "pages_scheduled=1 "
         "pages_completed=1 "
+        "pages_failed=0 "
         f"failure_reason= output={output_path} report={report_path}"
     )
     assert output_path.read_text(encoding="utf-8") == (
@@ -74,6 +75,7 @@ extract:
         "output_path": str(output_path),
         "pages_scheduled": 1,
         "pages_completed": 1,
+        "pages_failed": 0,
         "pages_attempted": 1,
         "requests_attempted": 1,
         "stop_reason": "completed",
@@ -86,6 +88,7 @@ extract:
         "stop_reason": "completed",
         "pages_scheduled": 1,
         "pages_completed": 1,
+        "pages_failed": 0,
         "pages_attempted": 1,
         "requests_attempted": 1,
         "failure_reason": "",

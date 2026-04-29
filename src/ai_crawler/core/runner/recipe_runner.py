@@ -37,6 +37,7 @@ class RunState:
     items_written: int
     pages_scheduled: int
     pages_completed: int
+    pages_failed: int
     pages_attempted: int
     requests_attempted: int
     stop_reason: RunnerStopReason
@@ -124,6 +125,7 @@ class RecipeRunner:
             output_path=str(output_path),
             pages_scheduled=state.pages_scheduled,
             pages_completed=state.pages_completed,
+            pages_failed=state.pages_failed,
             pages_attempted=state.pages_attempted,
             requests_attempted=state.requests_attempted,
             stop_reason=state.stop_reason,
@@ -144,6 +146,7 @@ class RecipeRunner:
         current_request_index = next_request_index
         pages_scheduled = 0
         pages_completed = 0
+        pages_failed = 0
         pages_attempted = 0
         requests_attempted = 0
         stop_reason: RunnerStopReason = "completed"
@@ -169,6 +172,7 @@ class RecipeRunner:
             )
             requests_attempted += request_attempts
             if response is None or stop_reason == "non_success_status":
+                pages_failed += 1
                 break
             extracted_items = _extract_response_items(response, recipe)
             items_written, stop_reason = _write_items(
@@ -195,6 +199,7 @@ class RecipeRunner:
             items_written=items_written,
             pages_scheduled=pages_scheduled,
             pages_completed=pages_completed,
+            pages_failed=pages_failed,
             pages_attempted=pages_attempted,
             requests_attempted=requests_attempted,
             stop_reason=stop_reason,
@@ -272,6 +277,7 @@ class RecipeRunner:
         next_flush_index = next_request_index
         pages_scheduled = next_schedule_offset
         pages_completed = 0
+        pages_failed = 0
         pages_attempted = 0
         requests_attempted = 0
         stop_reason: RunnerStopReason = "completed"
@@ -288,6 +294,7 @@ class RecipeRunner:
                     items_written=items_written,
                     pages_scheduled=pages_scheduled,
                     pages_completed=pages_completed,
+                    pages_failed=pages_failed,
                     pages_attempted=pages_attempted,
                     requests_attempted=requests_attempted,
                     stop_reason="max_seconds_reached",
@@ -304,6 +311,7 @@ class RecipeRunner:
                     items_written=items_written,
                     pages_scheduled=pages_scheduled,
                     pages_completed=pages_completed,
+                    pages_failed=pages_failed,
                     pages_attempted=pages_attempted,
                     requests_attempted=requests_attempted,
                     stop_reason="max_seconds_reached",
@@ -323,10 +331,12 @@ class RecipeRunner:
                 response, request_attempts, stop_reason = pending_results.pop(next_flush_index)
                 requests_attempted += request_attempts
                 if response is None or stop_reason == "non_success_status":
+                    pages_failed += 1
                     terminal_state = RunState(
                         items_written=items_written,
                         pages_scheduled=pages_scheduled,
                         pages_completed=pages_completed,
+                        pages_failed=pages_failed,
                         pages_attempted=pages_attempted,
                         requests_attempted=requests_attempted,
                         stop_reason=stop_reason,
@@ -345,6 +355,7 @@ class RecipeRunner:
                         items_written=items_written,
                         pages_scheduled=pages_scheduled,
                         pages_completed=pages_completed,
+                        pages_failed=pages_failed,
                         pages_attempted=pages_attempted,
                         requests_attempted=requests_attempted,
                         stop_reason=stop_reason,
@@ -358,6 +369,7 @@ class RecipeRunner:
                         items_written=items_written,
                         pages_scheduled=pages_scheduled,
                         pages_completed=pages_completed,
+                        pages_failed=pages_failed,
                         pages_attempted=pages_attempted,
                         requests_attempted=requests_attempted,
                         stop_reason=stop_reason,
@@ -411,6 +423,7 @@ class RecipeRunner:
             items_written=items_written,
             pages_scheduled=pages_scheduled,
             pages_completed=pages_completed,
+            pages_failed=pages_failed,
             pages_attempted=pages_attempted,
             requests_attempted=requests_attempted,
             stop_reason=stop_reason,

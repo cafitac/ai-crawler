@@ -884,6 +884,7 @@ def test_recipe_runner_stops_on_non_success_response(tmp_path: Path) -> None:
     result = runner.run(recipe)
 
     assert result.items_written == 0
+    assert result.pages_failed == 1
     assert result.pages_attempted == 1
     assert result.requests_attempted == 1
     assert result.stop_reason == "non_success_status"
@@ -995,6 +996,7 @@ def test_recipe_runner_stops_with_retry_exhausted_after_retry_budget_ends(
     assert fetcher.calls == 3
     assert sleep_calls == [0.1, 0.2]
     assert result.items_written == 0
+    assert result.pages_failed == 1
     assert result.pages_attempted == 1
     assert result.requests_attempted == 3
     assert result.stop_reason == "retry_exhausted"
@@ -1042,6 +1044,7 @@ def test_recipe_runner_keeps_last_checkpoint_when_retry_exhausted_after_progress
     result = runner.run(recipe)
 
     assert result.items_written == 2
+    assert result.pages_failed == 1
     assert result.pages_attempted == 2
     assert result.requests_attempted == 3
     assert result.stop_reason == "retry_exhausted"
