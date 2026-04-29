@@ -39,6 +39,23 @@ If you are already inside a local checkout:
 uv sync --extra dev --extra http --extra mcp
 ```
 
+## npm wrapper
+
+For npm-first onboarding, the repo also ships a thin Node wrapper that delegates to the Python core:
+
+```bash
+npx @cafitac/ai-crawler --help
+npx @cafitac/ai-crawler auto evidence.json --json
+npx @cafitac/ai-crawler mcp
+```
+
+Wrapper behavior:
+
+- inside the repo checkout: runs the local Python core with `uv run --project <repo> ai-crawler ...`
+- outside the repo checkout: runs the published Python core with `uvx --from "ai-crawler[all]" ai-crawler ...`
+- override the published Python package spec with `AI_CRAWLER_PYTHON_SPEC`
+- override the uvx Python version with `AI_CRAWLER_UVX_PYTHON`
+
 ## Quick start
 
 The one-command path from URL to crawler artifacts is:
@@ -163,6 +180,12 @@ Exposed tools:
 - `test_recipe`
 - `repair_recipe`
 
+If you prefer npm-first installation for agent tooling, the wrapper can also launch the MCP server:
+
+```bash
+npx @cafitac/ai-crawler mcp
+```
+
 Hermes development snippet shape:
 
 ```yaml
@@ -175,6 +198,9 @@ mcp_servers:
 ```
 
 ## Python SDK
+
+The Python SDK remains the stable embedded/programmatic surface. The npm package is only a launcher wrapper around this Python core.
+
 
 ```python
 from ai_crawler import AICrawler

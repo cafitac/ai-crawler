@@ -1,0 +1,46 @@
+name: npm-publish
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "npm-v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Run npm wrapper tests
+        run: |
+          npm test
+          npm pack --dry-run
+          node ./bin/ai-crawler.cjs --help
+
+      - name: Sync Python environment
+        run: uv sync --extra dev --extra http --extra mcp --python 3.13
+
+      - name: Run harness verification
+        run: bash scripts/verify-ai-harness.sh
+
+      - name: Publish npm wrapper
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance

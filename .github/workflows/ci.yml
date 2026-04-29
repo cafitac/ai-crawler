@@ -32,6 +32,12 @@ jobs:
       - name: Run lint
         run: uv run --extra dev ruff check .
 
+      - name: Run npm wrapper tests
+        run: |
+          npm test
+          npm pack --dry-run
+          node ./bin/ai-crawler.cjs --help
+
       - name: CLI smoke
         run: |
           uv run python -m ai_crawler.cli --help
