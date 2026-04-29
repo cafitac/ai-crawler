@@ -3,6 +3,9 @@
 import json
 from pathlib import Path
 
+import pytest
+
+import ai_crawler.core.runner.recipe_runner as recipe_runner_module
 from ai_crawler.core.models import FetchResponse, Recipe, RequestSpec
 from ai_crawler.core.runner import RecipeRunner, RunnerConfig
 
@@ -81,6 +84,105 @@ def test_recipe_runner_executes_query_page_pagination_to_jsonl(tmp_path: Path) -
         {"name": "Keyboard", "price": 120},
         {"name": "Mouse", "price": 40},
         {"name": "Monitor", "price": 300},
+    ]
+
+
+def test_recipe_runner_stops_after_max_items_and_keeps_partial_jsonl_valid(tmp_path: Path) -> None:
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [
+                {
+                    "id": "list-products",
+                    "method": "GET",
+                    "url": "https://example.test/api/products",
+                    "query": {"page": "1"},
+                }
+            ],
+            "pagination": {
+                "strategy": "query_page",
+                "query_param": "page",
+                "start": 1,
+                "max_pages": 3,
+            },
+            "execution": {"max_items": 2},
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    output_path = tmp_path / "guarded-products.jsonl"
+    fetcher = FakeFetcher()
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+
+    result = runner.run(recipe)
+
+    assert result.items_written == 2
+    assert result.pages_attempted == 1
+    assert result.requests_attempted == 1
+    assert result.stop_reason == "max_items_reached"
+    assert fetcher.urls == ["https://example.test/api/products?page=1"]
+    written_items = [
+        json.loads(line)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert written_items == [
+        {"name": "Keyboard", "price": 120},
+        {"name": "Mouse", "price": 40},
+    ]
+
+
+def test_recipe_runner_stops_before_next_request_when_max_seconds_exceeded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [
+                {
+                    "id": "list-products",
+                    "method": "GET",
+                    "url": "https://example.test/api/products",
+                    "query": {"page": "1"},
+                }
+            ],
+            "pagination": {
+                "strategy": "query_page",
+                "query_param": "page",
+                "start": 1,
+                "max_pages": 3,
+            },
+            "execution": {"max_seconds": 1},
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    output_path = tmp_path / "timed-products.jsonl"
+    fetcher = FakeFetcher()
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+    timeline = iter((0.0, 1.5))
+    monkeypatch.setattr(recipe_runner_module.time, "monotonic", lambda: next(timeline))
+
+    result = runner.run(recipe)
+
+    assert result.items_written == 2
+    assert result.pages_attempted == 1
+    assert result.requests_attempted == 1
+    assert result.stop_reason == "max_seconds_reached"
+    assert fetcher.urls == ["https://example.test/api/products?page=1"]
+    written_items = [
+        json.loads(line)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert written_items == [
+        {"name": "Keyboard", "price": 120},
+        {"name": "Mouse", "price": 40},
     ]
 
 

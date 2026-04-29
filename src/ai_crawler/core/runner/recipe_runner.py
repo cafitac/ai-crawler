@@ -1,6 +1,7 @@
 """Deterministic recipe runner."""
 
 import json
+import time
 from pathlib import Path
 from typing import Protocol
 
@@ -40,8 +41,15 @@ class RecipeRunner:
         pages_attempted = 0
         requests_attempted = 0
         stop_reason = "completed"
+        started_at = time.monotonic()
+        max_items = recipe.execution.max_items
+        max_seconds = recipe.execution.max_seconds
         with output_path.open("w", encoding="utf-8") as output_file:
             for request in _expand_requests(recipe):
+                if max_seconds is not None and pages_attempted > 0:
+                    if time.monotonic() - started_at >= max_seconds:
+                        stop_reason = "max_seconds_reached"
+                        break
                 pages_attempted += 1
                 requests_attempted += 1
                 response = self._fetcher.fetch(request)
@@ -52,6 +60,11 @@ class RecipeRunner:
                 for item in extracted_items:
                     output_file.write(json.dumps(item, ensure_ascii=False) + "\n")
                     items_written += 1
+                    if max_items is not None and items_written >= max_items:
+                        stop_reason = "max_items_reached"
+                        break
+                if stop_reason == "max_items_reached":
+                    break
                 if not extracted_items:
                     stop_reason = "empty_page"
                     break
