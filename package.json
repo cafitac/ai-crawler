@@ -1,6 +1,6 @@
 {
   "name": "@cafitac/ai-crawler",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "npm delivery wrapper for the ai-crawler Python CLI",
   "license": "MIT",
   "type": "commonjs",

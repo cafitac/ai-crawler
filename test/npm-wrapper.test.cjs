@@ -18,7 +18,7 @@ test('buildCoreCommand uses local uv run inside repo checkout', () => {
   });
 });
 
-test('buildCoreCommand uses uvx published python core outside repo checkout', () => {
+test('buildCoreCommand uses uvx git source for published python core outside repo checkout', () => {
   const command = wrapper.buildCoreCommand({
     cwd: '/tmp/work',
     packageRoot: '/repo/ai-crawler',
@@ -28,7 +28,14 @@ test('buildCoreCommand uses uvx published python core outside repo checkout', ()
 
   assert.deepEqual(command, {
     executable: 'uvx',
-    args: ['--python', '3.11', '--from', 'ai-crawler[all]', 'ai-crawler', 'mcp'],
+    args: [
+      '--python',
+      '3.11',
+      '--from',
+      'git+https://github.com/cafitac/ai-crawler.git[all]',
+      'ai-crawler',
+      'mcp',
+    ],
   });
 });
 
