@@ -547,6 +547,8 @@ def run_recipe_command(recipe_path: str, output_path: str) -> int:
         "ai-crawler run: "
         f"recipe={result.recipe_name} "
         f"items_written={result.items_written} "
+        f"pages_attempted={result.pages_attempted} "
+        f"requests_attempted={result.requests_attempted} "
         f"stop_reason={result.stop_reason} "
         f"output={result.output_path}"
         f"{checkpoint_summary}"
