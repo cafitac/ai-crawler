@@ -249,13 +249,39 @@ class RecipeRunner:
         requests_attempted = 0
         stop_reason: RunnerStopReason = "completed"
         max_items = recipe.execution.max_items
+        max_seconds = recipe.execution.max_seconds
         terminal_state: RunState | None = None
 
         while pending_tasks:
+            remaining_timeout = _remaining_timeout_seconds(
+                clock=self._clock,
+                started_at=started_at,
+                max_seconds=max_seconds,
+                pages_attempted=pages_attempted,
+            )
+            if remaining_timeout == 0:
+                terminal_state = RunState(
+                    items_written=items_written,
+                    pages_attempted=pages_attempted,
+                    requests_attempted=requests_attempted,
+                    stop_reason="max_seconds_reached",
+                    current_request_index=next_flush_index,
+                )
+                break
             done, pending_tasks = await asyncio.wait(
                 pending_tasks,
+                timeout=remaining_timeout,
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            if not done:
+                terminal_state = RunState(
+                    items_written=items_written,
+                    pages_attempted=pages_attempted,
+                    requests_attempted=requests_attempted,
+                    stop_reason="max_seconds_reached",
+                    current_request_index=next_flush_index,
+                )
+                break
             for task in done:
                 request_index, result = task.result()
                 pending_results[request_index] = result
@@ -310,6 +336,11 @@ class RecipeRunner:
                     stop_reason="completed",
                 )
                 next_flush_index += 1
+
+        if pending_tasks:
+            for task in pending_tasks:
+                task.cancel()
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
 
         if terminal_state is not None:
             return terminal_state
@@ -380,9 +411,6 @@ def _validate_execution_mode(recipe: Recipe) -> None:
         return
     if recipe.execution.delay_ms > 0:
         msg = "execution.delay_ms with concurrency > 1 is not supported yet"
-        raise ValueError(msg)
-    if recipe.execution.max_seconds is not None:
-        msg = "execution.max_seconds with concurrency > 1 is not supported yet"
         raise ValueError(msg)
 
 
@@ -522,6 +550,21 @@ def _max_seconds_reached(
         and pages_attempted > 0
         and clock() - started_at >= max_seconds
     )
+
+
+def _remaining_timeout_seconds(
+    clock: Callable[[], float],
+    started_at: float,
+    max_seconds: int | None,
+    pages_attempted: int,
+) -> float | None:
+    if max_seconds is None or pages_attempted <= 0:
+        return None
+    elapsed = clock() - started_at
+    remaining = max_seconds - elapsed
+    if remaining <= 0:
+        return 0
+    return remaining
 
 
 def _max_seconds_reached_during_retry(

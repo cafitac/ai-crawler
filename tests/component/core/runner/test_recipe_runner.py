@@ -132,6 +132,31 @@ class CheckpointStreamingFetcher:
         )
 
 
+class ConcurrentTimeoutFetcher:
+    def __init__(self) -> None:
+        self.page_one_done = threading.Event()
+        self.release_later_pages = threading.Event()
+
+    def fetch(self, request: RequestSpec) -> FetchResponse:
+        page = request.query["page"]
+        items_by_page = {
+            "1": [{"id": "p1", "name": "Keyboard", "price": 120}],
+            "2": [{"id": "p2", "name": "Mouse", "price": 40}],
+            "3": [],
+        }
+        if page == "1":
+            self.page_one_done.set()
+        else:
+            self.release_later_pages.wait(timeout=0.3)
+        return FetchResponse(
+            url=request.url,
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_text=json.dumps({"items": items_by_page[page]}),
+            elapsed_ms=5,
+        )
+
+
 def test_recipe_runner_executes_query_page_pagination_to_jsonl(tmp_path: Path) -> None:
     recipe = Recipe.model_validate(
         {
@@ -335,6 +360,81 @@ def test_recipe_runner_advances_checkpoint_during_concurrent_flush(tmp_path: Pat
         "output_path": str(output_path),
         "stop_reason": "completed",
     }
+
+
+
+def test_recipe_runner_stops_concurrent_run_when_max_seconds_expires(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checkpoint_path = tmp_path / "concurrent-timeout.checkpoint.json"
+    output_path = tmp_path / "concurrent-timeout.jsonl"
+    recipe = Recipe.model_validate(
+        {
+            "name": "products-api",
+            "start_url": "https://example.test/products",
+            "requests": [
+                {
+                    "id": "list-products",
+                    "method": "GET",
+                    "url": "https://example.test/api/products",
+                    "query": {"page": "1"},
+                }
+            ],
+            "pagination": {
+                "strategy": "query_page",
+                "query_param": "page",
+                "start": 1,
+                "max_pages": 3,
+            },
+            "execution": {
+                "concurrency": 2,
+                "max_seconds": 1,
+                "checkpoint_path": str(checkpoint_path),
+            },
+            "extract": {
+                "item_path": "$.items[*]",
+                "fields": {"name": "$.name", "price": "$.price"},
+            },
+        }
+    )
+    fetcher = ConcurrentTimeoutFetcher()
+    current_time = [0.0]
+    monkeypatch.setattr(recipe_runner_module.time, "monotonic", lambda: current_time[0])
+    runner = RecipeRunner(fetcher=fetcher, config=RunnerConfig(output_path=str(output_path)))
+    result_holder: dict[str, object] = {}
+    error_holder: list[BaseException] = []
+
+    def run_recipe() -> None:
+        try:
+            result_holder["result"] = runner.run(recipe)
+        except BaseException as exc:  # pragma: no cover - propagated below
+            error_holder.append(exc)
+
+    thread = threading.Thread(target=run_recipe)
+    thread.start()
+    assert fetcher.page_one_done.wait(timeout=1), "page 1 should complete before timeout advances"
+    current_time[0] = 1.5
+    thread.join(timeout=2)
+    fetcher.release_later_pages.set()
+
+    assert not error_holder
+    result = result_holder["result"]
+    assert result.items_written == 1
+    assert result.pages_attempted == 1
+    assert result.requests_attempted == 1
+    assert result.stop_reason == "max_seconds_reached"
+    assert result.checkpoint_path == str(checkpoint_path)
+    assert json.loads(checkpoint_path.read_text(encoding="utf-8")) == {
+        "recipe_name": "products-api",
+        "next_request_index": 1,
+        "items_written": 1,
+        "output_path": str(output_path),
+        "stop_reason": "max_seconds_reached",
+    }
+    assert output_path.read_text(encoding="utf-8") == (
+        '{"name": "Keyboard", "price": 120}\n'
+    )
 
 
 
