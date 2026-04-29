@@ -24,7 +24,11 @@ from ai_crawler.core.models import AgentAction, EvidenceBundle, Recipe, ToolResu
 from ai_crawler.core.recipes import RecipeLoader
 from ai_crawler.core.runner import RecipeFetcher, RecipeRunner, RunnerConfig
 from ai_crawler.core.security import redact_text
-from ai_crawler.mcp.config import SUPPORTED_CLIENTS, build_client_config
+from ai_crawler.mcp.config import (
+    SUPPORTED_CLIENTS,
+    SUPPORTED_LAUNCHERS,
+    build_client_config,
+)
 
 DEFAULT_RUN_OUTPUT = "crawl.jsonl"
 DEFAULT_EVIDENCE_OUTPUT = "evidence.json"
@@ -252,6 +256,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=".",
         help="Path to the ai-crawler project root for uv --project.",
     )
+    mcp_config_parser.add_argument(
+        "--launcher",
+        choices=SUPPORTED_LAUNCHERS,
+        default="uv",
+        help="Launcher to use in the generated MCP snippet.",
+    )
     return parser
 
 
@@ -386,7 +396,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return mcp_command()
 
     if args.command == "mcp-config":
-        return mcp_config_command(client=args.client, project_path=args.project)
+        return mcp_config_command(
+            client=args.client,
+            project_path=args.project,
+            launcher=args.launcher,
+        )
 
     return 0
 
@@ -399,9 +413,13 @@ def mcp_command() -> int:
     return 0
 
 
-def mcp_config_command(client: str, project_path: str) -> int:
-    """Print a copy-pasteable MCP client configuration snippet."""
-    print(build_client_config(client=client, project_path=project_path))
+def mcp_config_command(
+    client: str,
+    project_path: str,
+    launcher: str = "uv",
+) -> int:
+    """Print a ready-to-paste MCP client snippet."""
+    print(build_client_config(client=client, project_path=project_path, launcher=launcher))
     return 0
 
 

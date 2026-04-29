@@ -159,12 +159,18 @@ uv run --extra http ai-crawler test-recipe repaired.recipe.yaml --output crawl.j
 
 ## MCP usage
 
-Generate client config snippets:
+Generate client config snippets for local uv-project usage:
 
 ```bash
 uv run ai-crawler mcp-config --client hermes --project /path/to/ai-crawler
 uv run ai-crawler mcp-config --client claude-code --project /path/to/ai-crawler
 uv run ai-crawler mcp-config --client codex --project /path/to/ai-crawler
+```
+
+Generate npm-first snippets for the published wrapper:
+
+```bash
+uv run ai-crawler mcp-config --client hermes --launcher npm
 ```
 
 Run as a stdio MCP server:
@@ -194,6 +200,17 @@ mcp_servers:
   ai-crawler:
     command: "uv"
     args: ["run", "--project", "/path/to/ai-crawler", "--extra", "mcp", "--extra", "http", "ai-crawler", "mcp"]
+    timeout: 300
+    connect_timeout: 60
+```
+
+Hermes npm-first snippet shape:
+
+```yaml
+mcp_servers:
+  ai-crawler:
+    command: "npx"
+    args: ["-y", "@cafitac/ai-crawler", "mcp"]
     timeout: 300
     connect_timeout: 60
 ```
